@@ -1,0 +1,538 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Caddie — AI caddie</title>
+<link href="https://api.mapbox.com/mapbox-gl-js/v3.8.0/mapbox-gl.css" rel="stylesheet">
+<link href="https://api.mapbox.com/mapbox-gl-js/plugins/mapbox-gl-draw/v1.4.3/mapbox-gl-draw.css" rel="stylesheet">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --ink:#17301f; --ink2:#4d6454; --paper:#f3f6f1; --line:#d5ddd2; --turf:#2f7d46; --turf2:#5fc27e;
+  --sand:#e8cf8a; --water:#3b82c4; --trees:#1f4a2a; --ob:#ffffff; --warn:#b3312c;
+  box-sizing:border-box;
+}
+*,*::before,*::after{box-sizing:inherit}
+html,body{margin:0;height:100%}
+body{font-family:"Barlow Semi Condensed",Segoe UI,Roboto,system-ui,sans-serif;color:var(--ink);font-size:16px;
+  font-variant-numeric:tabular-nums;background:#0e1410}
+#map{position:fixed;inset:0}
+.panel{position:fixed;z-index:5;background:var(--paper);box-shadow:0 6px 24px rgba(0,0,0,.35);
+  display:flex;flex-direction:column;overflow:hidden}
+@media (min-width:760px){.panel{top:12px;left:12px;bottom:12px;width:360px;border-radius:14px}}
+@media (max-width:759px){.panel{left:0;right:0;bottom:0;max-height:52vh;border-radius:16px 16px 0 0;
+  padding-bottom:env(safe-area-inset-bottom,0px)}}
+.head{padding:12px 14px 10px;border-bottom:1px solid var(--line)}
+.head h1{font-size:21px;margin:0 0 8px;font-weight:600;line-height:1.1}
+.row{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.row+.row{margin-top:7px}
+input,select,button{font:inherit;color:inherit}
+input[type=text],select{border:1px solid var(--line);border-radius:8px;padding:6px 8px;background:#fff;min-width:0}
+#q{flex:1}
+button{border:1px solid var(--line);background:#fff;border-radius:8px;padding:6px 10px;cursor:pointer;font-weight:500}
+button:hover{border-color:var(--ink2)}
+button[aria-pressed="true"]{background:var(--ink);color:#fff;border-color:var(--ink)}
+button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--turf2);outline-offset:1px}
+.results{margin-top:6px;display:none;border:1px solid var(--line);border-radius:8px;background:#fff;max-height:150px;overflow:auto}
+.results button{display:block;width:100%;text-align:left;border:0;border-bottom:1px solid var(--line);border-radius:0}
+.body{overflow:auto;padding:10px 14px 16px;flex:1}
+.body h2{font-size:15px;margin:14px 0 6px;color:var(--ink2);font-weight:600}
+.body h2:first-child{margin-top:2px}
+.tools{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
+.tools button{display:flex;flex-direction:column;align-items:center;gap:3px;padding:7px 4px;font-size:14px}
+.sw{width:18px;height:12px;border-radius:3px;border:1px solid rgba(0,0,0,.25)}
+.tee-dot{width:14px;height:14px;border-radius:50%;border:2px solid #fff;box-shadow:0 0 0 1px rgba(0,0,0,.4)}
+.hint{font-size:14px;color:var(--ink2);margin:8px 0 0;min-height:1.3em}
+table{width:100%;border-collapse:collapse;font-size:15px}
+td,th{padding:4px 3px;border-bottom:1px solid var(--line);text-align:right;font-weight:500}
+th{color:var(--ink2);font-weight:600;font-size:13px}
+td:first-child,th:first-child{text-align:left}
+.empty{color:var(--ink2);font-size:14px;margin:4px 0}
+.gps{background:#fff;border:1px solid var(--line);border-radius:10px;padding:8px 10px;display:flex;justify-content:space-between;gap:8px}
+.gps b{font-size:22px;display:block;line-height:1.1}
+.gps span{font-size:13px;color:var(--ink2)}
+.planbox{background:#fff;border:1px solid var(--line);border-radius:10px;padding:10px 12px}
+.planbox .rec{font-size:24px;font-weight:600;line-height:1.1}
+.planbox .sub{color:var(--ink2);font-size:14px;margin-top:2px}
+.planbox ol{margin:8px 0 0;padding-left:20px}.planbox li{margin:2px 0}
+.slab{display:block;margin:8px 0;font-size:14px}.slab input[type=range],.slab select,.slab textarea{display:block;width:100%;margin-top:3px}
+.slab textarea{font:14px/1.35 ui-monospace,Menlo,monospace;border:1px solid var(--line);border-radius:8px;padding:6px}
+details summary{cursor:pointer;font-weight:600;color:var(--ink2)}
+#tokenGate{position:fixed;inset:0;z-index:20;background:rgba(10,20,14,.82);display:flex;align-items:center;justify-content:center;padding:20px}
+#tokenGate[hidden]{display:none}
+.gatebox{background:var(--paper);border-radius:14px;padding:18px 18px 12px;max-width:440px;width:100%}
+.gatebox h2{margin:0 0 8px;font-size:20px}.gatebox input{width:100%;margin:6px 0 8px}.gatebox .small{font-size:13px;color:var(--ink2)}
+.foot{font-size:13px;color:var(--ink2);padding:8px 14px 10px;border-top:1px solid var(--line)}
+.warn{color:var(--warn)}
+.mapboxgl-ctrl-group button{width:36px;height:36px}
+</style>
+</head>
+<body>
+<div id="map" role="application" aria-label="Satellite map of the course"></div>
+<div id="tokenGate" hidden>
+  <div class="gatebox">
+    <h2>Connect Mapbox on this device</h2>
+    <p>Paste your <b>public</b> Mapbox token (it starts with <code>pk.</code>). It is saved in this browser only — never in the app's files or on GitHub.</p>
+    <input id="tokIn" type="text" placeholder="pk.…" autocomplete="off" spellcheck="false">
+    <button id="tokSave">Save and load the map</button>
+    <p id="tokMsg" class="warn"></p>
+    <p class="small">Create or copy it at console.mapbox.com → Tokens, and restrict it to https://thangdh73.github.io/</p>
+  </div>
+</div>
+
+<aside class="panel">
+  <div class="head">
+    <h1>AI caddie</h1>
+    <div class="row">
+      <input id="q" type="text" placeholder="Find a course" value="Seri Selangor Golf Club" aria-label="Find a course">
+      <button id="go">Find</button>
+    </div>
+    <div class="results" id="results"></div>
+    <div class="row">
+      <label>Hole <select id="hole"></select></label>
+      <label>Par <select id="par"><option>3</option><option selected>4</option><option>5</option></select></label>
+      <label>Plan from <select id="fromTee"></select></label>
+    </div>
+  </div>
+
+  <div class="body">
+    <h2>Your plan</h2>
+    <div id="plan" class="planbox"><p class="empty">Mark a tee and the green, and the caddie plans the hole.</p></div>
+    <div class="row" style="margin-top:8px">
+      <button id="planTee">Plan from the tee</button>
+      <button id="planMe">Plan from where I stand</button>
+    </div>
+    <details style="margin-top:8px"><summary>Your game</summary>
+      <label class="slab">Strokes above the peer-group baseline <span id="vOff">+0.25</span>
+        <input id="off" type="range" min="0" max="120" step="5" value="25"></label>
+      <label class="slab">Tree height <span id="vTree">15 m</span>
+        <input id="treeH" type="range" min="6" max="30" step="1" value="15"></label>
+      <label class="slab">How you're striking it <span id="vDisp">normal</span>
+        <input id="disp" type="range" min="70" max="140" step="5" value="100"></label>
+      <label class="slab">Usual miss
+        <select id="miss"><option value="0">straight</option><option value="4">slight fade (right)</option>
+        <option value="8">big fade (right)</option><option value="-4">slight draw (left)</option><option value="-8">big draw (left)</option></select></label>
+      <label class="slab">Your bag — club, carry m, dispersion radius m
+        <textarea id="bag" rows="7"></textarea></label>
+      <button id="bagSave">Use this bag</button>
+    </details>
+
+    <h2>Mark the hole</h2>
+    <div class="tools" id="tools">
+      <button data-kind="tee" data-tee="black"><i class="tee-dot" style="background:#111"></i>Black tee</button>
+      <button data-kind="tee" data-tee="blue"><i class="tee-dot" style="background:#1e5bd6"></i>Blue tee</button>
+      <button data-kind="tee" data-tee="white"><i class="tee-dot" style="background:#fff"></i>White tee</button>
+      <button data-kind="tee" data-tee="red"><i class="tee-dot" style="background:#d6322b"></i>Red tee</button>
+      <button data-kind="greenc"><i class="tee-dot" style="background:#e9ff8a"></i>Green centre</button>
+      <button data-kind="green"><i class="sw" style="background:#b9e87a"></i>Green edge</button>
+      <button data-kind="fairway"><i class="sw" style="background:#79c95c"></i>Fairway</button>
+      <button data-kind="bunker"><i class="sw" style="background:var(--sand)"></i>Bunker</button>
+      <button data-kind="water"><i class="sw" style="background:var(--water)"></i>Water</button>
+      <button data-kind="trees"><i class="sw" style="background:var(--trees)"></i>Trees</button>
+      <button data-kind="ob"><i class="sw" style="background:repeating-linear-gradient(90deg,#fff 0 5px,#666 5px 8px)"></i>OB line</button>
+      <button id="del" title="Delete the selected shape"><i class="sw" style="background:#fff;border-style:dashed"></i>Delete</button>
+    </div>
+    <p class="hint" id="hint">Pick a tool, then tap the map. Areas: tap each corner, tap the first point to close.</p>
+
+    <h2>On the course</h2>
+    <div class="gps" id="gps"><div><b id="gF">—</b><span>front</span></div><div><b id="gC">—</b><span>centre</span></div><div><b id="gB">—</b><span>back</span></div></div>
+    <p class="empty" id="gpsNote">Tap the location button on the map to show where you are.</p>
+
+    <h2>Tees</h2>
+    <div id="tees"><p class="empty">No tees marked on this hole yet.</p></div>
+
+    <h2>Hazards from the selected tee</h2>
+    <div id="carries"><p class="empty">Mark a tee, the green centre and some hazards.</p></div>
+
+    <h2>Fairway width</h2>
+    <div class="row" style="margin-bottom:6px">
+      <label>At distances (m) <input id="dists" type="text" value="180 200 220 240" style="width:150px"></label>
+    </div>
+    <div id="widths"><p class="empty">Draw the fairway to see its width.</p></div>
+
+    <h2>Green</h2>
+    <div id="greenInfo"><p class="empty">Draw the green edge to see its size.</p></div>
+
+    <h2>Save</h2>
+    <div class="row">
+      <button id="export">Download hole data</button>
+      <label class="row" style="gap:4px"><button id="importBtn" type="button">Load file</button>
+        <input id="importFile" type="file" accept=".geojson,.json" hidden></label>
+    </div>
+    <p class="hint" id="saveNote">Saved on this device automatically.</p>
+  </div>
+  <div class="foot"><button id="forgetTok" style="float:right;font-size:12px;padding:2px 8px">Forget token</button>Planning is advice from a model: tree heights, slopes and wind are not measured. Imagery © Mapbox, © Maxar. Tracing Mapbox imagery is allowed for personal, non-commercial use and for OpenStreetMap only.</div>
+</aside>
+
+<script src="https://api.mapbox.com/mapbox-gl-js/v3.8.0/mapbox-gl.js"></script>
+<script src="https://api.mapbox.com/mapbox-gl-js/plugins/mapbox-gl-draw/v1.4.3/mapbox-gl-draw.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@turf/turf@7.1.0/turf.min.js"></script>
+<script src="caddie-engine.js"></script>
+<script>
+const TOKEN_KEY = "caddie-mapbox-token";
+const TOKEN = (()=>{try{return localStorage.getItem(TOKEN_KEY)||"";}catch{return "";}})();
+/* The Mapbox token is never stored in this file or on GitHub.
+   It is entered once on each device and kept in that browser only. */
+(function tokenGate(){
+  const box=document.getElementById("tokenGate");
+  if(TOKEN){box.hidden=true;return;}
+  box.hidden=false;
+  document.getElementById("tokSave").addEventListener("click",()=>{
+    const v=document.getElementById("tokIn").value.trim();
+    const msg=document.getElementById("tokMsg");
+    if(!/^pk\./.test(v)){msg.textContent=v.startsWith("sk.")?"That is a secret token (sk.). Never use it in a web page: delete it in the Mapbox console and use a public token starting pk.":"A public token starts with pk.";return;}
+    try{localStorage.setItem(TOKEN_KEY,v);}catch{msg.textContent="This browser won't save it. Check private-browsing settings.";return;}
+    location.reload();
+  });
+})();
+if(TOKEN){(function(){
+/* ---------- setup ---------- */
+const STORE = "caddie-course-mapper-v1";
+mapboxgl.accessToken = TOKEN;
+
+/* Starting view: longitude from the E101°35'18" grid line on the Google Earth
+   screenshot; latitude approximate. Use Find or the location button to refine. */
+const map = new mapboxgl.Map({
+  container: "map", style: "mapbox://styles/mapbox/satellite-v9",
+  center: [101.5883, 3.105], zoom: 15.5, maxZoom: 21, attributionControl: true
+});
+map.addControl(new mapboxgl.NavigationControl({ visualizePitch: false }), "top-right");
+const geo = new mapboxgl.GeolocateControl({
+  positionOptions: { enableHighAccuracy: true }, trackUserLocation: true, showUserHeading: true
+});
+map.addControl(geo, "top-right");
+map.addControl(new mapboxgl.ScaleControl({ unit: "metric" }), "bottom-right");
+
+const COLOR = ["match", ["get", "user_kind"],
+  "fairway", "#79c95c", "green", "#b9e87a", "bunker", "#e8cf8a", "water", "#3b82c4",
+  "trees", "#1f4a2a", "ob", "#ffffff", "#ffffff"];
+const TEECOL = ["match", ["get", "user_tee"], "black", "#111111", "blue", "#1e5bd6",
+  "white", "#ffffff", "red", "#d6322b", "#e9ff8a"];
+const draw = new MapboxDraw({
+  displayControlsDefault: false, userProperties: true,
+  styles: [
+    { id: "fill", type: "fill", filter: ["all", ["==", "$type", "Polygon"]],
+      paint: { "fill-color": COLOR, "fill-opacity": ["case", ["==", ["get", "active"], "true"], .55, .38] } },
+    { id: "fill-edge", type: "line", filter: ["all", ["==", "$type", "Polygon"]],
+      paint: { "line-color": COLOR, "line-width": ["case", ["==", ["get", "active"], "true"], 3, 2] } },
+    { id: "ob-line", type: "line", filter: ["all", ["==", "$type", "LineString"]],
+      layout: { "line-cap": "round" },
+      paint: { "line-color": "#ffffff", "line-width": 3, "line-dasharray": [1.5, 1.2] } },
+    { id: "pt-halo", type: "circle", filter: ["all", ["==", "$type", "Point"], ["==", "meta", "feature"]],
+      paint: { "circle-radius": 9, "circle-color": "#000", "circle-opacity": .35 } },
+    { id: "pt", type: "circle", filter: ["all", ["==", "$type", "Point"], ["==", "meta", "feature"]],
+      paint: { "circle-radius": 6.5, "circle-color": ["case", ["==", ["get", "user_kind"], "tee"], TEECOL, "#e9ff8a"],
+        "circle-stroke-color": "#fff", "circle-stroke-width": 2 } },
+    { id: "vertex", type: "circle", filter: ["all", ["==", "meta", "vertex"], ["==", "$type", "Point"]],
+      paint: { "circle-radius": 5, "circle-color": "#fff", "circle-stroke-color": "#17301f", "circle-stroke-width": 2 } },
+    { id: "midpoint", type: "circle", filter: ["all", ["==", "meta", "midpoint"]],
+      paint: { "circle-radius": 3.5, "circle-color": "#fff" } }
+  ]
+});
+map.addControl(draw);
+
+/* ---------- state ---------- */
+const $ = id => document.getElementById(id);
+const holeSel = $("hole");
+for (let h = 1; h <= 18; h++) holeSel.add(new Option(String(h), String(h)));
+let pending = null;
+
+function hole() { return +holeSel.value; }
+function featuresOf(kind, h = hole()) {
+  return draw.getAll().features.filter(f => f.properties.kind === kind && +f.properties.hole === h);
+}
+
+/* ---------- tools ---------- */
+const MODE = { tee: "draw_point", greenc: "draw_point", green: "draw_polygon", fairway: "draw_polygon",
+  bunker: "draw_polygon", water: "draw_polygon", trees: "draw_polygon", ob: "draw_line_string" };
+const HINT = {
+  tee: "Tap the middle of the tee box.", greenc: "Tap the middle of the green.",
+  green: "Tap around the edge of the green, then tap the first point to close.",
+  fairway: "Tap around the mown fairway. Several pieces are fine.",
+  bunker: "Tap around the bunker's edge.", water: "Tap around the water.",
+  trees: "Tap around the tree canopy. Leave out shadows on the grass.",
+  ob: "Tap along the out-of-bounds stakes. Double-tap the last point to finish."
+};
+document.querySelectorAll("#tools button[data-kind]").forEach(b => b.addEventListener("click", () => {
+  document.querySelectorAll("#tools button").forEach(x => x.setAttribute("aria-pressed", "false"));
+  b.setAttribute("aria-pressed", "true");
+  pending = { kind: b.dataset.kind, tee: b.dataset.tee || null };
+  $("hint").textContent = HINT[pending.kind];
+  draw.changeMode(MODE[pending.kind]);
+}));
+$("del").addEventListener("click", () => { draw.trash(); save(); update(); });
+
+map.on("draw.create", e => {
+  for (const f of e.features) {
+    const p = pending || { kind: "fairway" };
+    draw.setFeatureProperty(f.id, "kind", p.kind);
+    draw.setFeatureProperty(f.id, "hole", hole());
+    if (p.tee) draw.setFeatureProperty(f.id, "tee", p.tee);
+    if (p.kind === "tee") {                        // one marker per tee colour per hole
+      featuresOf("tee").filter(t => t.properties.tee === p.tee && t.id !== f.id).forEach(t => draw.delete(t.id));
+    }
+    if (p.kind === "greenc") featuresOf("greenc").filter(t => t.id !== f.id).forEach(t => draw.delete(t.id));
+  }
+  document.querySelectorAll("#tools button").forEach(x => x.setAttribute("aria-pressed", "false"));
+  pending = null; $("hint").textContent = "Saved. Drag points to adjust, or pick another tool.";
+  save(); update();
+});
+map.on("draw.update", () => { save(); update(); });
+map.on("draw.delete", () => { save(); update(); });
+
+/* ---------- geometry: all distances in metres on the ground ---------- */
+const m = (a, b) => turf.distance(a, b, { units: "kilometers" }) * 1000;
+function greenCentre() {
+  const c = featuresOf("greenc")[0];
+  if (c) return c.geometry.coordinates;
+  const g = featuresOf("green")[0];
+  return g ? turf.centroid(g).geometry.coordinates : null;
+}
+function boundary(poly, stepM = 1) {                    // points along a polygon's edge
+  const line = turf.polygonToLine(poly);
+  const lines = line.type === "FeatureCollection" ? line.features : [line];
+  const pts = [];
+  for (const l of lines) {
+    const len = turf.length(l, { units: "kilometers" }) * 1000;
+    for (let s = 0; s <= len; s += stepM) pts.push(turf.along(l, s / 1000, { units: "kilometers" }).geometry.coordinates);
+  }
+  return pts;
+}
+function sideOf(tee, gc, p) {                           // left / right of the tee-to-green line
+  const b1 = turf.bearing(tee, gc), b2 = turf.bearing(tee, p);
+  const d = ((b2 - b1 + 540) % 360) - 180;
+  return Math.abs(d) < 2 ? "on line" : d < 0 ? "left" : "right";
+}
+function teeList() {
+  const order = ["black", "blue", "white", "red"];
+  return featuresOf("tee").sort((a, b) => order.indexOf(a.properties.tee) - order.indexOf(b.properties.tee));
+}
+function selectedTee() {
+  const ts = teeList(); if (!ts.length) return null;
+  return ts.find(t => t.properties.tee === $("fromTee").value) || ts[0];
+}
+
+/* ---------- readouts ---------- */
+function update() {
+  const ts = teeList(), gc = greenCentre();
+  // tee picker
+  const cur = $("fromTee").value;
+  $("fromTee").innerHTML = ts.map(t => `<option value="${t.properties.tee}">${t.properties.tee}</option>`).join("");
+  if (ts.some(t => t.properties.tee === cur)) $("fromTee").value = cur;
+  else if (ts.some(t => t.properties.tee === "blue")) $("fromTee").value = "blue";
+
+  // tees
+  if (!ts.length) $("tees").innerHTML = `<p class="empty">No tees marked on hole ${hole()} yet.</p>`;
+  else $("tees").innerHTML = `<table><tr><th>Tee</th><th>To green centre</th></tr>` +
+    ts.map(t => `<tr><td>${t.properties.tee}</td><td>${gc ? Math.round(m(t.geometry.coordinates, gc)) + " m" : "mark the green"}</td></tr>`).join("") + `</table>`;
+
+  const tee = selectedTee();
+  // carries, like a yardage book: to the near edge ("carry") and far edge ("reach")
+  const hz = [...featuresOf("bunker").map(f => ["Bunker", f]), ...featuresOf("water").map(f => ["Water", f]),
+              ...featuresOf("trees").map(f => ["Trees", f])];
+  if (!tee || !gc || !hz.length) $("carries").innerHTML = `<p class="empty">Mark a tee, the green centre and some hazards.</p>`;
+  else {
+    const rows = hz.map(([name, f]) => {
+      const pts = boundary(f, 1).map(p => [m(tee.geometry.coordinates, p), p]);
+      pts.sort((a, b) => a[0] - b[0]);
+      const near = pts[0], far = pts[pts.length - 1];
+      return { name, carry: near[0], reach: far[0], side: sideOf(tee.geometry.coordinates, gc, turf.centroid(f).geometry.coordinates) };
+    }).sort((a, b) => a.carry - b.carry);
+    $("carries").innerHTML = `<table><tr><th>Hazard</th><th>Side</th><th>To (near edge)</th><th>Carry (far edge)</th></tr>` +
+      rows.map(r => `<tr><td>${r.name}</td><td>${r.side}</td><td>${Math.round(r.carry)} m</td><td>${Math.round(r.reach)} m</td></tr>`).join("") + `</table>`;
+  }
+
+  // fairway width at chosen distances: the arc at that distance from the tee, inside the fairway
+  const fw = featuresOf("fairway");
+  if (!tee || !fw.length) $("widths").innerHTML = `<p class="empty">Draw the fairway to see its width.</p>`;
+  else {
+    const dists = $("dists").value.split(/[ ,]+/).map(Number).filter(d => d > 0);
+    const T = tee.geometry.coordinates, base = gc ? turf.bearing(T, gc) : 0;
+    const rows = dists.map(d => {
+      let best = 0, run = 0, step = .25;
+      for (let a = -60; a <= 60; a += step) {
+        const p = turf.destination(T, d / 1000, base + a, { units: "kilometers" });
+        const inside = fw.some(f => turf.booleanPointInPolygon(p, f));
+        run = inside ? run + 1 : 0; best = Math.max(best, run);
+      }
+      return [d, best * step * Math.PI / 180 * d];
+    });
+    $("widths").innerHTML = `<table><tr><th>From ${tee.properties.tee} tee</th><th>Fairway width</th></tr>` +
+      rows.map(([d, w]) => `<tr><td>${d} m</td><td>${w > 0.5 ? Math.round(w) + " m" : '<span class="warn">no fairway</span>'}</td></tr>`).join("") + `</table>`;
+  }
+
+  // green size along the line of play
+  const g = featuresOf("green")[0];
+  if (!g) $("greenInfo").innerHTML = `<p class="empty">Draw the green edge to see its size.</p>`;
+  else {
+    const area = turf.area(g);
+    let txt = `<table><tr><td>Area</td><td>${Math.round(area)} m²</td></tr>`;
+    if (tee && gc) {
+      const T = tee.geometry.coordinates, b = turf.bearing(T, gc);
+      const pts = boundary(g, .5).map(p => {
+        const d = m(T, p), a = (turf.bearing(T, p) - b) * Math.PI / 180;
+        return [d * Math.cos(a), d * Math.sin(a)];
+      });
+      const al = pts.map(p => p[0]), ac = pts.map(p => p[1]);
+      txt += `<tr><td>Front / back from ${tee.properties.tee} tee</td><td>${Math.round(Math.min(...al))} / ${Math.round(Math.max(...al))} m</td></tr>` +
+             `<tr><td>Depth × width</td><td>${Math.round(Math.max(...al) - Math.min(...al))} × ${Math.round(Math.max(...ac) - Math.min(...ac))} m</td></tr>`;
+    }
+    $("greenInfo").innerHTML = txt + `</table>`;
+  }
+  updateGps();
+  schedulePlan();
+}
+$("dists").addEventListener("change", update);
+$("fromTee").addEventListener("change", update);
+holeSel.addEventListener("change", () => { update(); fitHole(); });
+
+/* ---------- AI caddie ---------- */
+const BAG_KEY="caddie-bag-v1";
+const E=window.CaddieEngine;
+let BAG=E.DEFAULT_BAG;
+try{const s=JSON.parse(localStorage.getItem(BAG_KEY));if(Array.isArray(s)&&s.length)BAG=s;}catch{}
+$("bag").value=BAG.map(c=>c.join(", ")).join("\n");
+$("bagSave").addEventListener("click",()=>{
+  const rows=$("bag").value.split("\n").map(l=>l.split(",").map(s=>s.trim())).filter(r=>r.length===3&&+r[1]>0&&+r[2]>0)
+    .map(r=>[r[0],+r[1],+r[2]]).sort((a,b)=>b[1]-a[1]);
+  if(!rows.length){$("bag").value+="\n(Each line: club, carry, radius)";return;}
+  BAG=rows;try{localStorage.setItem(BAG_KEY,JSON.stringify(BAG));}catch{}schedulePlan();});
+const setLab=(id,f)=>{$(id).addEventListener("input",()=>{f();schedulePlan();});f();};
+setLab("off",()=>$("vOff").textContent="+"+(+$("off").value/100).toFixed(2));
+setLab("treeH",()=>$("vTree").textContent=$("treeH").value+" m");
+setLab("disp",()=>{const v=+$("disp").value;$("vDisp").textContent=v<90?"flushing it":v>110?"loose today":"normal";});
+$("miss").addEventListener("change",schedulePlan);
+
+let planTimer=null,fromMe=false;
+function schedulePlan(){clearTimeout(planTimer);planTimer=setTimeout(runPlan,350);}
+$("planTee").addEventListener("click",()=>{fromMe=false;runPlan();});
+$("planMe").addEventListener("click",()=>{if(!me){$("plan").innerHTML='<p class="empty warn">Tap the location button on the map first.</p>';return;}fromMe=true;runPlan();});
+
+function runPlan(){
+  const fc=draw.getAll();
+  const ts=teeList(); if(!ts.length||!greenCentre()){clearPlanLayers();return;}
+  $("plan").innerHTML='<p class="empty">Planning… (simulating a few thousand shots)</p>';
+  setTimeout(()=>{
+    let H,C,p;
+    try{
+      H=E.buildHole(fc,hole(),$("fromTee").value||ts[0].properties.tee);
+      C=E.makeCaddie(H,{bag:BAG,off:+$("off").value/100,treeH:+$("treeH").value,disp:+$("disp").value/100,missM:+$("miss").value});
+      if(fromMe){const [x,y]=H.P.to(me);if(H.lie(x,y)==="X"){$("plan").innerHTML='<p class="empty warn">You are outside the mapped hole. Stand on the hole, or plan from the tee.</p>';return;}
+        p=C.planFrom(x,y);} else p=C.planTee();
+    }catch(err){$("plan").innerHTML=`<p class="empty warn">${err.message}</p>`;return;}
+    showPlan(H,p);
+  },20);
+}
+function sideText(o){return o.off===0?"at the flag line":`${Math.abs(o.off)} m ${o.off>0?"right":"left"} of the flag line`;}
+function showPlan(H,p){
+  const b=p.best,pc=v=>Math.round(100*(v||0))+"%",m=b.mix||p.options[0].mix;
+  const rows=p.options.map((o,i)=>`<tr${i?"":' style="font-weight:600"'}><td>${o.club[0]}</td><td>${o.v.toFixed(2)}</td><td>${pc(o.mix.F)}</td><td>${pc((o.mix.R||0)+(o.mix.S||0))}</td><td>${pc(o.mix.T)}</td><td>${pc((o.mix.O||0)+(o.mix.X||0))}</td></tr>`).join("");
+  $("plan").innerHTML=`<div class="rec">${b.club[0]} · ${Math.round(b.club[1])} m</div>
+    <div class="sub">Aim ${sideText(b)}. Expected score ${p.expected.toFixed(2)}${fromMe?` from ${Math.round(p.toPin)} m`:" for the hole"}.</div>
+    <ol>${p.chain.map(s=>`<li>${s.club} ${s.carry} m → ${s.left} m left, ${s.lie}</li>`).join("")}</ol>
+    <table style="margin-top:6px"><tr><th>Option</th><th>Score</th><th>Fairway</th><th>Rough/sand</th><th>Trees</th><th>OB</th></tr>${rows}</table>
+    ${H.warnings.length?`<p class="empty warn" style="margin-top:6px">${H.warnings.join(" ")}</p>`:""}`;
+  drawPlan(H,p);
+}
+const OUTC={F:"#7ee06a",G:"#e9ff9a",R:"#3f7a37",S:"#f2d27a",T:"#e2462f",hit:"#e2462f",W:"#3b8fd6",O:"#d63bd6",X:"#d63bd6"};
+function clearPlanLayers(){for(const id of["plan-cloud","plan-line"]){if(map.getSource(id))map.getSource(id).setData({type:"FeatureCollection",features:[]});}}
+function drawPlan(H,p){
+  const ll=xy=>H.P.from(xy);
+  const lines=p.chain.map(s=>({type:"Feature",properties:{label:`${s.club} ${s.carry} m`},geometry:{type:"LineString",coordinates:[ll(s.from),ll(s.aim)]}}));
+  const pts=p.cloud.map(o=>({type:"Feature",properties:{c:OUTC[o.k]||"#fff"},geometry:{type:"Point",coordinates:ll([o.x,o.y])}}));
+  const set=(id,data)=>{if(map.getSource(id))map.getSource(id).setData(data);};
+  if(!map.getSource("plan-line")){
+    map.addSource("plan-line",{type:"geojson",data:{type:"FeatureCollection",features:[]}});
+    map.addSource("plan-cloud",{type:"geojson",data:{type:"FeatureCollection",features:[]}});
+    map.addLayer({id:"plan-line-casing",type:"line",source:"plan-line",paint:{"line-color":"#1a2a1d","line-width":6,"line-opacity":.6}});
+    map.addLayer({id:"plan-line",type:"line",source:"plan-line",paint:{"line-color":"#f4f86b","line-width":3}});
+    map.addLayer({id:"plan-label",type:"symbol",source:"plan-line",layout:{"symbol-placement":"line-center","text-field":["get","label"],"text-size":14,"text-font":["DIN Pro Medium","Arial Unicode MS Regular"]},
+      paint:{"text-color":"#10200f","text-halo-color":"#ffffff","text-halo-width":2}});
+    map.addLayer({id:"plan-cloud",type:"circle",source:"plan-cloud",paint:{"circle-radius":3.2,"circle-color":["get","c"],"circle-stroke-color":"#000","circle-stroke-width":.6}});
+  }
+  set("plan-line",{type:"FeatureCollection",features:lines});
+  set("plan-cloud",{type:"FeatureCollection",features:pts});
+}
+
+/* ---------- GPS: distances from where you stand ---------- */
+let me = null;
+geo.on("geolocate", e => { me = [e.coords.longitude, e.coords.latitude]; $("gpsNote").textContent = `GPS accuracy about ${Math.round(e.coords.accuracy)} m.`; updateGps(); });
+function updateGps() {
+  if (!me) return;
+  const gc = greenCentre(), g = featuresOf("green")[0];
+  $("gC").textContent = gc ? Math.round(m(me, gc)) : "—";
+  if (g && gc) {
+    // front and back along your line to the green centre
+    const b = turf.bearing(me, gc);
+    const al = boundary(g, .5).map(p => { const d = m(me, p), a = (turf.bearing(me, p) - b) * Math.PI / 180; return d * Math.cos(a); });
+    $("gF").textContent = Math.round(Math.min(...al)); $("gB").textContent = Math.round(Math.max(...al));
+  } else { $("gF").textContent = "—"; $("gB").textContent = "—"; }
+}
+
+/* ---------- search ---------- */
+async function find() {
+  const q = $("q").value.trim(); if (!q) return;
+  const c = map.getCenter();
+  const url = `https://api.mapbox.com/search/searchbox/v1/forward?q=${encodeURIComponent(q)}&proximity=${c.lng},${c.lat}&limit=5&access_token=${TOKEN}`;
+  const box = $("results"); box.style.display = "block"; box.innerHTML = `<p class="empty" style="padding:6px 8px">Searching…</p>`;
+  try {
+    const r = await fetch(url); const j = await r.json();
+    const fs = j.features || [];
+    if (!fs.length) { box.innerHTML = `<p class="empty" style="padding:6px 8px">No match. Pan the map to the course instead.</p>`; return; }
+    box.innerHTML = "";
+    fs.forEach(f => {
+      const b = document.createElement("button");
+      const p = f.properties || {};
+      b.textContent = `${p.name || "Result"} — ${p.place_formatted || p.full_address || ""}`;
+      b.onclick = () => { map.flyTo({ center: f.geometry.coordinates, zoom: 16.5 }); box.style.display = "none"; };
+      box.appendChild(b);
+    });
+  } catch (err) { box.innerHTML = `<p class="empty warn" style="padding:6px 8px">Search failed: ${err.message}. Check the access token.</p>`; }
+}
+$("go").addEventListener("click", find);
+$("q").addEventListener("keydown", e => { if (e.key === "Enter") find(); });
+
+/* ---------- save / load ---------- */
+function save() {
+  try { localStorage.setItem(STORE, JSON.stringify(draw.getAll())); $("saveNote").textContent = "Saved on this device."; }
+  catch { $("saveNote").textContent = "Couldn't save on this device. Use Download to keep your work."; }
+}
+function load() {
+  try { const s = localStorage.getItem(STORE); if (s) draw.set(JSON.parse(s)); } catch {}
+}
+$("export").addEventListener("click", () => {
+  const fc = draw.getAll();
+  fc.properties = { course: $("q").value, exported: new Date().toISOString(),
+    source: "Traced by golfer on Mapbox Satellite; personal, non-commercial use",
+    par: Object.fromEntries([...new Set(fc.features.map(f => f.properties.hole))].map(h => [h, h == hole() ? +$("par").value : null])) };
+  const blob = new Blob([JSON.stringify(fc, null, 1)], { type: "application/geo+json" });
+  const a = document.createElement("a"); a.href = URL.createObjectURL(blob);
+  a.download = `course-hole-data-${new Date().toISOString().slice(0, 10)}.geojson`; a.click();
+});
+$("importBtn").addEventListener("click", () => $("importFile").click());
+$("importFile").addEventListener("change", async e => {
+  const f = e.target.files[0]; if (!f) return;
+  try { draw.set(JSON.parse(await f.text())); save(); update(); fitHole(); $("saveNote").textContent = `Loaded ${f.name}.`; }
+  catch { $("saveNote").textContent = "That file isn't hole data from this mapper."; }
+});
+function fitHole() {
+  const fs = draw.getAll().features.filter(f => +f.properties.hole === hole());
+  if (!fs.length) return;
+  const bb = turf.bbox({ type: "FeatureCollection", features: fs });
+  map.fitBounds(bb, { padding: { top: 60, bottom: 60, left: window.innerWidth >= 760 ? 400 : 40, right: 60 }, maxZoom: 18.5 });
+}
+map.on("load", () => { load(); update(); fitHole(); });
+map.on("error", e => {
+  const msg = (e && e.error && e.error.message) || "";
+  if (/401|403|token/i.test(msg)) $("hint").innerHTML = `<span class="warn">Mapbox rejected the access token. Check it on the Tokens page, and that this site's address is allowed.</span>`;
+});
+
+window.__caddie={map,draw,update:typeof update==="function"?update:null,runPlan:typeof runPlan==="function"?runPlan:null};
+$("forgetTok").addEventListener("click",()=>{try{localStorage.removeItem(TOKEN_KEY);}catch{}location.reload();});
+})();}
+</script>
+</body>
+</html>
