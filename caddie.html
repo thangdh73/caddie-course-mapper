@@ -91,6 +91,8 @@ details summary{cursor:pointer;font-weight:600;color:var(--ink2)}
       <button id="go">Find</button>
     </div>
     <div class="results" id="results"></div>
+    <div class="row"><button id="osmBtn" title="Load every hole of the course in view from OpenStreetMap">Load holes from OpenStreetMap</button></div>
+    <p class="hint" id="osmNote" style="margin:4px 0 0"></p>
     <div class="row">
       <label>Hole <select id="hole"></select></label>
       <label>Par <select id="par"><option>3</option><option selected>4</option><option>5</option></select></label>
@@ -218,7 +220,9 @@ const draw = new MapboxDraw({
       paint: { "fill-color": COLOR, "fill-opacity": ["case", ["==", ["get", "active"], "true"], .55, .38] } },
     { id: "fill-edge", type: "line", filter: ["all", ["==", "$type", "Polygon"]],
       paint: { "line-color": COLOR, "line-width": ["case", ["==", ["get", "active"], "true"], 3, 2] } },
-    { id: "ob-line", type: "line", filter: ["all", ["==", "$type", "LineString"]],
+    { id: "hole-line", type: "line", filter: ["all", ["==", "$type", "LineString"], ["==", "user_kind", "holeline"]],
+      paint: { "line-color": "#f4f86b", "line-width": 1.5, "line-opacity": .55, "line-dasharray": [3, 3] } },
+    { id: "ob-line", type: "line", filter: ["all", ["==", "$type", "LineString"], ["!=", "user_kind", "holeline"]],
       layout: { "line-cap": "round" },
       paint: { "line-color": "#ffffff", "line-width": 3, "line-dasharray": [1.5, 1.2] } },
     { id: "pt-halo", type: "circle", filter: ["all", ["==", "$type", "Point"], ["==", "meta", "feature"]],
@@ -387,7 +391,70 @@ function update() {
 }
 $("dists").addEventListener("change", update);
 $("fromTee").addEventListener("change", update);
-holeSel.addEventListener("change", () => { update(); fitHole(); });
+holeSel.addEventListener("change", () => { const pr=HOLE_PAR[hole()]; if(pr) $("par").value=String(pr); update(); fitHole(); });
+
+/* ---------- OpenStreetMap import ---------- */
+const PAR_KEY="caddie-hole-par-v1";
+let HOLE_PAR={}; try{HOLE_PAR=JSON.parse(localStorage.getItem(PAR_KEY))||{};}catch{}
+$("osmBtn").addEventListener("click",osmImport);
+async function osmImport(){
+  const c=map.getCenter(), note=$("osmNote");
+  note.textContent="Asking OpenStreetMap for the course in view…";
+  const q=`[out:json][timeout:40];is_in(${c.lat},${c.lng})->.a;area.a[leisure=golf_course]->.c;
+    (way(area.c)[golf];relation(area.c)[golf];way(area.c)[natural=water];way(area.c)[natural=wood];
+     way(area.c)[landuse=forest];way(area.c)[natural=tree_row];);out geom tags;
+    area.a[leisure=golf_course];out tags;`;
+  // the free OpenStreetMap servers are often busy: try several, and accept only real data
+  const SERVERS=["https://overpass-api.de/api/interpreter","https://overpass.kumi.systems/api/interpreter","https://overpass.private.coffee/api/interpreter"];
+  let r=null;
+  for(const ep of SERVERS){
+    try{const txt=await fetch(ep,{method:"POST",body:"data="+encodeURIComponent(q)}).then(x=>x.text());
+      if(txt.trim().startsWith("{")){r=JSON.parse(txt);break;}}catch(e){}
+    note.textContent="OpenStreetMap server busy, trying another…";
+  }
+  if(!r){note.textContent="All OpenStreetMap servers are busy. Try again in a minute.";return;}
+  const course=(r.elements.find(e=>e.type==="area")||{}).tags;
+  const ways=r.elements.filter(e=>e.type==="way"&&e.geometry);
+  const holes=ways.filter(w=>w.tags.golf==="hole"&&w.tags.ref);
+  if(!holes.length){note.textContent="No mapped holes here. Centre the map on a golf course, or mark this course by hand.";return;}
+  const line=w=>w.geometry.map(p=>[p.lon,p.lat]);
+  const closed=w=>{const g=line(w);return g.length>3&&g[0][0]===g[g.length-1][0]&&g[0][1]===g[g.length-1][1];};
+  const HL=holes.map(w=>({ref:+w.tags.ref,par:+w.tags.par||null,g:line(w)}));
+  const nearestHole=(pt)=>{let best=null;for(const h of HL){const d=turf.pointToLineDistance(turf.point(pt),turf.lineString(h.g),{units:"kilometers"})*1000;if(!best||d<best.d)best={d,ref:h.ref};}return best;};
+  const KIND={green:"green",fairway:"fairway",bunker:"bunker",water_hazard:"water",lateral_water_hazard:"water",tee:"teebox",pin:"greenc"};
+  // replace anything imported from OSM before; keep everything you marked yourself
+  const mine=draw.getAll().features.filter(f=>f.properties.source!=="osm");
+  const haveTee=new Set(mine.filter(f=>f.properties.kind==="tee").map(f=>+f.properties.hole));
+  const haveGreenc=new Set(mine.filter(f=>f.properties.kind==="greenc").map(f=>+f.properties.hole));
+  const add=[],teeBoxes={};
+  for(const h of HL){
+    add.push({type:"Feature",properties:{kind:"holeline",hole:h.ref,source:"osm"},geometry:{type:"LineString",coordinates:h.g}});
+    if(!haveGreenc.has(h.ref))add.push({type:"Feature",properties:{kind:"greenc",hole:h.ref,source:"osm"},geometry:{type:"Point",coordinates:h.g[h.g.length-1]}});
+    if(h.par)HOLE_PAR[h.ref]=h.par;
+  }
+  let n=0;
+  for(const w of ways){
+    const t=w.tags; let kind=KIND[t.golf]||(t.natural==="water"?"water":(t.natural==="wood"||t.landuse==="forest")?"trees":null);
+    if(!kind||!closed(w))continue;
+    const poly=turf.polygon([line(w)]); const ctr=turf.centroid(poly).geometry.coordinates;
+    const nh=nearestHole(ctr); if(!nh||nh.d>(kind==="water"||kind==="trees"?60:45))continue;   // only features that belong to a hole
+    if(kind==="teebox"){(teeBoxes[nh.ref]=teeBoxes[nh.ref]||[]).push(ctr);continue;}
+    add.push({type:"Feature",properties:{kind,hole:nh.ref,source:"osm"},geometry:poly.geometry});n++;
+  }
+  // tees: drawn tee boxes if mapped (farthest = black, then blue, white, red); otherwise the start of the hole line
+  for(const h of HL){if(haveTee.has(h.ref))continue;
+    const g=h.g[h.g.length-1]; let pts=teeBoxes[h.ref]||[];
+    if(!pts.length){add.push({type:"Feature",properties:{kind:"tee",tee:"blue",hole:h.ref,source:"osm"},geometry:{type:"Point",coordinates:h.g[0]}});continue;}
+    pts.sort((a,b)=>turf.distance(b,g)-turf.distance(a,g));
+    const cols=pts.length===1?["blue"]:["black","blue","white","red"];
+    pts.slice(0,4).forEach((p,i)=>add.push({type:"Feature",properties:{kind:"tee",tee:cols[i],hole:h.ref,source:"osm"},geometry:{type:"Point",coordinates:p}}));}
+  draw.set({type:"FeatureCollection",features:[...mine,...add]});
+  try{localStorage.setItem(PAR_KEY,JSON.stringify(HOLE_PAR));}catch{}
+  save(); const pr=HOLE_PAR[hole()]; if(pr)$("par").value=String(pr);
+  update(); fitHole();
+  const detail=n?`${n} bunkers, greens, fairways, water or woods`:"no bunkers, greens or trees (mark them for better plans)";
+  note.textContent=`Loaded ${HL.length} holes of ${(course&&course.name)||"this course"} from OpenStreetMap: tees, greens, par and routing, plus ${detail}. © OpenStreetMap contributors.`;
+}
 
 /* ---------- AI caddie ---------- */
 const BAG_KEY="caddie-bag-v1";

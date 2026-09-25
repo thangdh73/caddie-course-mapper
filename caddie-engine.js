@@ -41,7 +41,8 @@ function mulberry(seed) { return function () { seed |= 0; seed = seed + 0x6D2B79
 /* ---------- reading the marked hole ---------- */
 const KIND = { tee: "tee", teebox: "tee", tee_box: "tee", greenc: "greenc", green_centre: "greenc", green_center: "greenc",
   pin: "greenc", green: "green", fairway: "fairway", bunker: "bunker", sand: "bunker", water: "water", pond: "water",
-  trees: "trees", tree: "trees", canopy: "trees", ob: "ob", out_of_bounds: "ob", oob: "ob" };
+  trees: "trees", tree: "trees", canopy: "trees", ob: "ob", out_of_bounds: "ob", oob: "ob",
+  holeline: "holeline", hole_line: "holeline", hole: "holeline" };
 function kindOf(p) {
   const k = String(p.kind || p.type || p.feature || p.category || p.layer || "").toLowerCase().replace(/[\s-]+/g, "_");
   return KIND[k] || null;
@@ -82,6 +83,9 @@ function buildHole(geojson, holeNo, teeColour) {
       : f.geometry.coordinates.map(pg => pg.map(r => r.map(P.to))));
   const G = polys("green"), F = polys("fairway"), S = polys("bunker"), W = polys("water"), T = polys("trees");
   const OBL = byKind("ob").filter(f => f.geometry.type === "LineString").map(f => f.geometry.coordinates.map(P.to));
+  // bends of the hole's routing line: extra targets so dog-legs can be played to the corner
+  const via = byKind("holeline").filter(f => f.geometry.type === "LineString")
+    .flatMap(f => f.geometry.coordinates.slice(1, -1).map(P.to));
 
   // area of the hole: everything marked, plus a margin; beyond it is unknown ground
   const all = [[0, 0], pinXY, ...[G, F, S, W, T].flat(3), ...OBL.flat()];
@@ -130,7 +134,7 @@ function buildHole(geojson, holeNo, teeColour) {
     return CODE[grid[k * NX + i]];
   };
   const counts = {}; for (const v of grid) counts[CODE[v]] = (counts[CODE[v]] || 0) + 1;
-  return { P, pin: pinXY, tee: tee.properties, teeColour: teeOf(tee.properties), lie, bbox: [x0, y0, x1, y1],
+  return { P, pin: pinXY, via, tee: tee.properties, teeColour: teeOf(tee.properties), lie, bbox: [x0, y0, x1, y1],
     counts, warnings: [T.length ? null : "No trees marked: the caddie can't see any trees.",
       OBL.length ? null : "No OB line marked.", F.length ? null : "No fairway marked: everything counts as rough."].filter(Boolean) };
 }
@@ -188,13 +192,14 @@ function makeCaddie(hole, opts = {}) {
     if (o.k === "W") { const bx = o.x + (x - o.x) * .05, by = o.y + (y - o.y) * .05; return 1 + Math.max(vAt(bx, by), es("R", bx, by)); }
     return vAt(o.x, o.y);
   }
-  function aimPoint(x, y, club, off) {       // off = metres right (+) / left (-) of the line to the pin
-    const dx = px - x, dy = py - y, L = Math.hypot(dx, dy) || 1, ex = dx / L, ey = dy / L;
+  function aimPoint(x, y, club, off, tgt) {  // off = metres right (+) / left (-) of the line to the target
+    const [tx, ty] = tgt || [px, py];
+    const dx = tx - x, dy = ty - y, L = Math.hypot(dx, dy) || 1, ex = dx / L, ey = dy / L;
     const c = plays(club[1]);
     return [x + ex * c + ey * off, y + ey * c - ex * off];
   }
-  function ev(x, y, club, off, N, fromTee) {
-    const [ax, ay] = aimPoint(x, y, club, off);
+  function ev(x, y, club, off, N, fromTee, tgt) {
+    const [ax, ay] = aimPoint(x, y, club, off, tgt);
     let t = 0; for (let i = 0; i < N; i++) t += outcomeValue(sampleShot(x, y, club, ax, ay, fromTee), x, y);
     return 1 + t / N;
   }
@@ -226,8 +231,8 @@ function makeCaddie(hole, opts = {}) {
     V.set(NV);
   }
 
-  function mix(x, y, club, off, N, fromTee) {
-    const [ax, ay] = aimPoint(x, y, club, off), m = {};
+  function mix(x, y, club, off, N, fromTee, tgt) {
+    const [ax, ay] = aimPoint(x, y, club, off, tgt), m = {};
     for (let i = 0; i < N; i++) { const o = sampleShot(x, y, club, ax, ay, fromTee); const k = o.k === "hit" ? "T" : o.k; m[k] = (m[k] || 0) + 1 / N; }
     return m;
   }
@@ -235,18 +240,21 @@ function makeCaddie(hole, opts = {}) {
     const l0 = fromTee ? "F" : hole.lie(x, y);
     const clubs = fromTee ? S.bag.filter(c => c[1] <= dPin(x, y) + 25) : candidates(x, y, l0, false);
     const offs = []; for (let a = -36; a <= 36; a += 3) offs.push(a);
+    // targets: the flag, plus any bend of the hole line that is still ahead of the ball
+    const dNow = dPin(x, y);
+    const targets = [null, ...(hole.via || []).filter(v => dPin(...v) < dNow - 20 && Math.hypot(v[0] - x, v[1] - y) > 60)];
     const perClub = [];
     for (const c of clubs) {
       let bc = null;
-      for (const a of (l0 === "T" ? [-24, -18, -12, -6, 0, 6, 12, 18, 24] : offs)) {
-        const v = ev(x, y, c, a, fromTee ? 200 : 120, fromTee); if (!bc || v < bc.v) bc = { v, club: c, off: a };
+      for (const tg of targets) for (const a of (l0 === "T" ? [-24, -18, -12, -6, 0, 6, 12, 18, 24] : offs)) {
+        const v = ev(x, y, c, a, fromTee ? 200 : 120, fromTee, tg); if (!bc || v < bc.v) bc = { v, club: c, off: a, tgt: tg };
       }
       perClub.push(bc);
     }
     perClub.sort((a, b) => a.v - b.v);
     const best = perClub[0];
-    const options = perClub.slice(0, 3).map(o => Object.assign(o, { mix: mix(x, y, o.club, o.off, 400, fromTee) }));
-    const [ax, ay] = aimPoint(x, y, best.club, best.off);
+    const options = perClub.slice(0, 3).map(o => Object.assign(o, { mix: mix(x, y, o.club, o.off, 400, fromTee, o.tgt) }));
+    const [ax, ay] = aimPoint(x, y, best.club, best.off, best.tgt);
     const cloud = []; for (let i = 0; i < 160; i++) cloud.push(sampleShot(x, y, best.club, ax, ay, fromTee));
     // the rest of the hole, following the middle of each shot
     const chain = [{ club: best.club[0], carry: Math.round(plays(best.club[1])), from: [x, y], aim: [ax, ay] }];

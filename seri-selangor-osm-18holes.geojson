@@ -1,0 +1,1119 @@
+{
+ "type": "FeatureCollection",
+ "features": [
+  {
+   "type": "Feature",
+   "properties": {
+    "kind": "holeline",
+    "hole": 1
+   },
+   "geometry": {
+    "type": "LineString",
+    "coordinates": [
+     [
+      101.590115,
+      3.147737
+     ],
+     [
+      101.588251,
+      3.146933
+     ],
+     [
+      101.587234,
+      3.146253
+     ]
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "kind": "greenc",
+    "hole": 1
+   },
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     101.587234,
+     3.146253
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "kind": "tee",
+    "tee": "blue",
+    "hole": 1
+   },
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     101.590115,
+     3.147737
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "kind": "holeline",
+    "hole": 2
+   },
+   "geometry": {
+    "type": "LineString",
+    "coordinates": [
+     [
+      101.586531,
+      3.145991
+     ],
+     [
+      101.584744,
+      3.146669
+     ],
+     [
+      101.583767,
+      3.148543
+     ]
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "kind": "greenc",
+    "hole": 2
+   },
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     101.583767,
+     3.148543
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "kind": "tee",
+    "tee": "blue",
+    "hole": 2
+   },
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     101.586531,
+     3.145991
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "kind": "holeline",
+    "hole": 3
+   },
+   "geometry": {
+    "type": "LineString",
+    "coordinates": [
+     [
+      101.584213,
+      3.148791
+     ],
+     [
+      101.583038,
+      3.149413
+     ]
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "kind": "greenc",
+    "hole": 3
+   },
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     101.583038,
+     3.149413
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "kind": "tee",
+    "tee": "blue",
+    "hole": 3
+   },
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     101.584213,
+     3.148791
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "kind": "holeline",
+    "hole": 4
+   },
+   "geometry": {
+    "type": "LineString",
+    "coordinates": [
+     [
+      101.582566,
+      3.149351
+     ],
+     [
+      101.583375,
+      3.147686
+     ],
+     [
+      101.584137,
+      3.146622
+     ]
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "kind": "greenc",
+    "hole": 4
+   },
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     101.584137,
+     3.146622
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "kind": "tee",
+    "tee": "blue",
+    "hole": 4
+   },
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     101.582566,
+     3.149351
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "kind": "holeline",
+    "hole": 5
+   },
+   "geometry": {
+    "type": "LineString",
+    "coordinates": [
+     [
+      101.583994,
+      3.146155
+     ],
+     [
+      101.582834,
+      3.147178
+     ],
+     [
+      101.582227,
+      3.148929
+     ],
+     [
+      101.581688,
+      3.149333
+     ]
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "kind": "greenc",
+    "hole": 5
+   },
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     101.581688,
+     3.149333
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "kind": "tee",
+    "tee": "blue",
+    "hole": 5
+   },
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     101.583994,
+     3.146155
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "kind": "holeline",
+    "hole": 6
+   },
+   "geometry": {
+    "type": "LineString",
+    "coordinates": [
+     [
+      101.580722,
+      3.149711
+     ],
+     [
+      101.581913,
+      3.147767
+     ],
+     [
+      101.582397,
+      3.146853
+     ],
+     [
+      101.582577,
+      3.146306
+     ]
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "kind": "greenc",
+    "hole": 6
+   },
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     101.582577,
+     3.146306
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "kind": "tee",
+    "tee": "blue",
+    "hole": 6
+   },
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     101.580722,
+     3.149711
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "kind": "holeline",
+    "hole": 7
+   },
+   "geometry": {
+    "type": "LineString",
+    "coordinates": [
+     [
+      101.582398,
+      3.146034
+     ],
+     [
+      101.584389,
+      3.145699
+     ],
+     [
+      101.585588,
+      3.145773
+     ]
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "kind": "greenc",
+    "hole": 7
+   },
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     101.585588,
+     3.145773
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "kind": "tee",
+    "tee": "blue",
+    "hole": 7
+   },
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     101.582398,
+     3.146034
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "kind": "holeline",
+    "hole": 8
+   },
+   "geometry": {
+    "type": "LineString",
+    "coordinates": [
+     [
+      101.585223,
+      3.145389
+     ],
+     [
+      101.586742,
+      3.145579
+     ]
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "kind": "greenc",
+    "hole": 8
+   },
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     101.586742,
+     3.145579
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "kind": "tee",
+    "tee": "blue",
+    "hole": 8
+   },
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     101.585223,
+     3.145389
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "kind": "holeline",
+    "hole": 9
+   },
+   "geometry": {
+    "type": "LineString",
+    "coordinates": [
+     [
+      101.586826,
+      3.146606
+     ],
+     [
+      101.588617,
+      3.147725
+     ],
+     [
+      101.589932,
+      3.148103
+     ]
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "kind": "greenc",
+    "hole": 9
+   },
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     101.589932,
+     3.148103
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "kind": "tee",
+    "tee": "blue",
+    "hole": 9
+   },
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     101.586826,
+     3.146606
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "kind": "holeline",
+    "hole": 10
+   },
+   "geometry": {
+    "type": "LineString",
+    "coordinates": [
+     [
+      101.591048,
+      3.147646
+     ],
+     [
+      101.59105,
+      3.14583
+     ],
+     [
+      101.59049,
+      3.144613
+     ]
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "kind": "greenc",
+    "hole": 10
+   },
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     101.59049,
+     3.144613
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "kind": "tee",
+    "tee": "blue",
+    "hole": 10
+   },
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     101.591048,
+     3.147646
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "kind": "holeline",
+    "hole": 11
+   },
+   "geometry": {
+    "type": "LineString",
+    "coordinates": [
+     [
+      101.590425,
+      3.143163
+     ],
+     [
+      101.59121,
+      3.141491
+     ],
+     [
+      101.591543,
+      3.140909
+     ]
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "kind": "greenc",
+    "hole": 11
+   },
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     101.591543,
+     3.140909
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "kind": "tee",
+    "tee": "blue",
+    "hole": 11
+   },
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     101.590425,
+     3.143163
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "kind": "holeline",
+    "hole": 12
+   },
+   "geometry": {
+    "type": "LineString",
+    "coordinates": [
+     [
+      101.591545,
+      3.14056
+     ],
+     [
+      101.591498,
+      3.139302
+     ]
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "kind": "greenc",
+    "hole": 12
+   },
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     101.591498,
+     3.139302
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "kind": "tee",
+    "tee": "blue",
+    "hole": 12
+   },
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     101.591545,
+     3.14056
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "kind": "holeline",
+    "hole": 13
+   },
+   "geometry": {
+    "type": "LineString",
+    "coordinates": [
+     [
+      101.592052,
+      3.139174
+     ],
+     [
+      101.591888,
+      3.141843
+     ],
+     [
+      101.59144,
+      3.142869
+     ],
+     [
+      101.590977,
+      3.142996
+     ]
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "kind": "greenc",
+    "hole": 13
+   },
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     101.590977,
+     3.142996
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "kind": "tee",
+    "tee": "blue",
+    "hole": 13
+   },
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     101.592052,
+     3.139174
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "kind": "holeline",
+    "hole": 14
+   },
+   "geometry": {
+    "type": "LineString",
+    "coordinates": [
+     [
+      101.590919,
+      3.144159
+     ],
+     [
+      101.591563,
+      3.145862
+     ]
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "kind": "greenc",
+    "hole": 14
+   },
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     101.591563,
+     3.145862
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "kind": "tee",
+    "tee": "blue",
+    "hole": 14
+   },
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     101.590919,
+     3.144159
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "kind": "holeline",
+    "hole": 15
+   },
+   "geometry": {
+    "type": "LineString",
+    "coordinates": [
+     [
+      101.591521,
+      3.146417
+     ],
+     [
+      101.593664,
+      3.145716
+     ],
+     [
+      101.594762,
+      3.145718
+     ]
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "kind": "greenc",
+    "hole": 15
+   },
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     101.594762,
+     3.145718
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "kind": "tee",
+    "tee": "blue",
+    "hole": 15
+   },
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     101.591521,
+     3.146417
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "kind": "holeline",
+    "hole": 16
+   },
+   "geometry": {
+    "type": "LineString",
+    "coordinates": [
+     [
+      101.594217,
+      3.145261
+     ],
+     [
+      101.59418,
+      3.143395
+     ],
+     [
+      101.59502,
+      3.142053
+     ]
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "kind": "greenc",
+    "hole": 16
+   },
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     101.59502,
+     3.142053
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "kind": "tee",
+    "tee": "blue",
+    "hole": 16
+   },
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     101.594217,
+     3.145261
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "kind": "holeline",
+    "hole": 17
+   },
+   "geometry": {
+    "type": "LineString",
+    "coordinates": [
+     [
+      101.595566,
+      3.142361
+     ],
+     [
+      101.594681,
+      3.144379
+     ],
+     [
+      101.594782,
+      3.145239
+     ]
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "kind": "greenc",
+    "hole": 17
+   },
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     101.594782,
+     3.145239
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "kind": "tee",
+    "tee": "blue",
+    "hole": 17
+   },
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     101.595566,
+     3.142361
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "kind": "holeline",
+    "hole": 18
+   },
+   "geometry": {
+    "type": "LineString",
+    "coordinates": [
+     [
+      101.594972,
+      3.146073
+     ],
+     [
+      101.592553,
+      3.14699
+     ],
+     [
+      101.591658,
+      3.147113
+     ],
+     [
+      101.591512,
+      3.14759
+     ]
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "kind": "greenc",
+    "hole": 18
+   },
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     101.591512,
+     3.14759
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "kind": "tee",
+    "tee": "blue",
+    "hole": 18
+   },
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     101.594972,
+     3.146073
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "kind": "water",
+    "hole": 10
+   },
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       101.590818,
+       3.146087
+      ],
+      [
+       101.59085,
+       3.14583
+      ],
+      [
+       101.590694,
+       3.145481
+      ],
+      [
+       101.590635,
+       3.14553
+      ],
+      [
+       101.590646,
+       3.145626
+      ],
+      [
+       101.590598,
+       3.145674
+      ],
+      [
+       101.590678,
+       3.146097
+      ],
+      [
+       101.590635,
+       3.146226
+      ],
+      [
+       101.590667,
+       3.146247
+      ],
+      [
+       101.590657,
+       3.146633
+      ],
+      [
+       101.590603,
+       3.146901
+      ],
+      [
+       101.590539,
+       3.146944
+      ],
+      [
+       101.590571,
+       3.146965
+      ],
+      [
+       101.590549,
+       3.147222
+      ],
+      [
+       101.590694,
+       3.147303
+      ],
+      [
+       101.590807,
+       3.147297
+      ],
+      [
+       101.590946,
+       3.146997
+      ],
+      [
+       101.590775,
+       3.146494
+      ],
+      [
+       101.590818,
+       3.146087
+      ]
+     ]
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "kind": "water",
+    "hole": 5
+   },
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       101.581344,
+       3.149283
+      ],
+      [
+       101.581402,
+       3.149318
+      ],
+      [
+       101.581617,
+       3.149219
+      ],
+      [
+       101.581721,
+       3.149013
+      ],
+      [
+       101.58182,
+       3.148926
+      ],
+      [
+       101.582018,
+       3.148862
+      ],
+      [
+       101.582076,
+       3.148793
+      ],
+      [
+       101.582073,
+       3.148688
+      ],
+      [
+       101.581928,
+       3.148688
+      ],
+      [
+       101.581649,
+       3.148561
+      ],
+      [
+       101.581538,
+       3.148546
+      ],
+      [
+       101.581442,
+       3.148595
+      ],
+      [
+       101.581341,
+       3.148868
+      ],
+      [
+       101.581344,
+       3.149283
+      ]
+     ]
+    ]
+   }
+  }
+ ]
+}
