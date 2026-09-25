@@ -26,9 +26,9 @@ const TP = 0.6, TREE_P = 0.7, CLEAR_M = 8, TEE_CLEAR_M = 20;
 const BASE = [[15, 2.42], [30, 2.58], [45, 2.68], [60, 2.76], [75, 2.84], [91, 2.92], [110, 2.98], [128, 3.05],
   [146, 3.13], [165, 3.25], [183, 3.41], [201, 3.54], [230, 3.70], [260, 3.86], [300, 4.05], [350, 4.30], [400, 4.55], [450, 4.78], [550, 5.2]];
 const PUTT = [[0.3, 1.0], [1, 1.35], [2, 1.55], [4, 1.72], [7, 1.86], [12, 2.00], [20, 2.15], [30, 2.32]];
-const PEN = { F: 0, R: .25, S: .46, T: .72, O: 1.2 };
+const PEN = { F: 0, R: .25, S: .46, T: .72, O: 1.2, U: .35 };   // U: ground the map couldn't read
 const ROLL = { F: 9, R: 4, G: 3, S: 0, T: 2 };
-const NAME = { F: "fairway", R: "rough", S: "sand", W: "water", T: "trees", G: "green", O: "OB", X: "off the map" };
+const NAME = { F: "fairway", R: "rough", S: "sand", W: "water", T: "trees", G: "green", O: "OB", X: "off the map", U: "uncertain" };
 
 function interp(t, d) {
   if (d <= t[0][0]) return t[0][1];
@@ -42,7 +42,7 @@ function mulberry(seed) { return function () { seed |= 0; seed = seed + 0x6D2B79
 const KIND = { tee: "tee", teebox: "tee", tee_box: "tee", greenc: "greenc", green_centre: "greenc", green_center: "greenc",
   pin: "greenc", green: "green", fairway: "fairway", bunker: "bunker", sand: "bunker", water: "water", pond: "water",
   trees: "trees", tree: "trees", canopy: "trees", ob: "ob", out_of_bounds: "ob", oob: "ob",
-  holeline: "holeline", hole_line: "holeline", hole: "holeline" };
+  holeline: "holeline", hole_line: "holeline", hole: "holeline", course: "course", golf_course: "course" };
 function kindOf(p) {
   const k = String(p.kind || p.type || p.feature || p.category || p.layer || "").toLowerCase().replace(/[\s-]+/g, "_");
   return KIND[k] || null;
@@ -65,7 +65,8 @@ function inPoly(x, y, rings) {             // even-odd over all rings (holes sup
 }
 
 /* Build the hole: a 2 m surface raster in ground metres. */
-function buildHole(geojson, holeNo, teeColour) {
+function buildHole(geojson, holeNo, teeColour, opts = {}) {
+  const CORRIDOR = opts.corridor === undefined ? 32 : opts.corridor;   // m; 0 switches the tree default off
   const fs = (geojson.features || []).filter(f => f && f.geometry && (holeNo == null || +f.properties.hole === +holeNo || f.properties.hole == null));
   const byKind = k => fs.filter(f => kindOf(f.properties) === k);
   const tees = byKind("tee");
@@ -84,17 +85,19 @@ function buildHole(geojson, holeNo, teeColour) {
   const G = polys("green"), F = polys("fairway"), S = polys("bunker"), W = polys("water"), T = polys("trees");
   const OBL = byKind("ob").filter(f => f.geometry.type === "LineString").map(f => f.geometry.coordinates.map(P.to));
   // bends of the hole's routing line: extra targets so dog-legs can be played to the corner
-  const via = byKind("holeline").filter(f => f.geometry.type === "LineString")
-    .flatMap(f => f.geometry.coordinates.slice(1, -1).map(P.to));
+  const routes = byKind("holeline").filter(f => f.geometry.type === "LineString").map(f => f.geometry.coordinates.map(P.to));
+  const via = routes.flatMap(r => r.slice(1, -1));
+  const COURSE = polys("course");
 
   // area of the hole: everything marked, plus a margin; beyond it is unknown ground
-  const all = [[0, 0], pinXY, ...[G, F, S, W, T].flat(3), ...OBL.flat()];
+  const all = [[0, 0], pinXY, ...[G, F, S, W, T].flat(3), ...OBL.flat(), ...routes.flat()];
   const xs = all.map(p => p[0]), ys = all.map(p => p[1]);
   const M = 45, C = 2;
   const x0 = Math.min(...xs) - M, y0 = Math.min(...ys) - M, x1 = Math.max(...xs) + M, y1 = Math.max(...ys) + M;
   const NX = Math.ceil((x1 - x0) / C), NY = Math.ceil((y1 - y0) / C);
   const grid = new Uint8Array(NX * NY);   // 0 R, 1 F, 2 S, 3 W, 4 T, 5 G, 6 O(OB)
-  const CODE = ["R", "F", "S", "W", "T", "G", "O"];
+  const CODE = ["R", "F", "S", "W", "T", "G", "O", "U"];
+  const SURF = { R: 0, F: 1, S: 2, W: 3, T: 4, G: 5, O: 6, U: 7 };
   const midTG = [pinXY[0] / 2, pinXY[1] / 2];
   // OB: for each OB line, the side away from the tee-green midpoint is out of bounds
   function obSide(x, y) {
@@ -128,6 +131,36 @@ function buildHole(geojson, holeNo, teeColour) {
       if (Math.hypot(x - pinXY[0], y - pinXY[1]) < 12) grid[k * NX + i] = 5;
     }
   }
+  /* defaults for ground nobody has marked */
+  const segDist = (x, y, L) => { let b = Infinity;
+    for (let i = 0; i < L.length - 1; i++) { const [ax, ay] = L[i], [bx, by] = L[i + 1], dx = bx - ax, dy = by - ay, l2 = dx * dx + dy * dy || 1;
+      const t = Math.max(0, Math.min(1, ((x - ax) * dx + (y - ay) * dy) / l2)); b = Math.min(b, Math.hypot(x - ax - t * dx, y - ay - t * dy)); }
+    return b; };
+  const inCourse = (x, y) => COURSE.some(p => inPoly(x, y, p));
+  let useCourse = false;
+  if (COURSE.length && routes.length) {          // only trust the outline if this hole lies inside it
+    const L = routes[0]; let n = 0, k = 0;
+    for (let i = 0; i < L.length - 1; i++) for (let s = 0; s <= 1; s += .05) { n++; if (inCourse(L[i][0] + (L[i + 1][0] - L[i][0]) * s, L[i][1] + (L[i + 1][1] - L[i][1]) * s)) k++; }
+    useCourse = k / n >= .95;
+  }
+  /* marked ground wins; unmarked ground comes from the auto-map when there is one */
+  const marked = new Uint8Array(NX * NY);
+  for (let i = 0; i < NX * NY; i++) marked[i] = grid[i] !== 0 ? 1 : 0;
+  let fromSurface = 0;
+  if (opts.surface) for (let k = 0; k < NY; k++) for (let i = 0; i < NX; i++) {
+    if (marked[k * NX + i]) continue;
+    const s = opts.surface(...P.from([x0 + (i + .5) * C, y0 + (k + .5) * C]));
+    if (s && SURF[s] !== undefined) { grid[k * NX + i] = SURF[s]; marked[k * NX + i] = 2; fromSurface++; }
+  }
+  let assumedTrees = 0, assumedOB = 0;
+  if (useCourse || (routes.length && CORRIDOR > 0)) {
+    for (let k = 0; k < NY; k++) for (let i = 0; i < NX; i++) {
+      if (marked[k * NX + i]) continue;             // marked or auto-mapped ground always wins
+      const x = x0 + (i + .5) * C, y = y0 + (k + .5) * C;
+      if (useCourse && !inCourse(x, y)) { grid[k * NX + i] = 6; assumedOB++; continue; }
+      if (routes.length && CORRIDOR > 0 && Math.min(...routes.map(L => segDist(x, y, L))) > CORRIDOR) { grid[k * NX + i] = 4; assumedTrees++; }
+    }
+  }
   const lie = (x, y) => {
     const i = Math.floor((x - x0) / C), k = Math.floor((y - y0) / C);
     if (i < 0 || i >= NX || k < 0 || k >= NY) return "X";
@@ -135,8 +168,11 @@ function buildHole(geojson, holeNo, teeColour) {
   };
   const counts = {}; for (const v of grid) counts[CODE[v]] = (counts[CODE[v]] || 0) + 1;
   return { P, pin: pinXY, via, tee: tee.properties, teeColour: teeOf(tee.properties), lie, bbox: [x0, y0, x1, y1],
-    counts, warnings: [T.length ? null : "No trees marked: the caddie can't see any trees.",
-      OBL.length ? null : "No OB line marked.", F.length ? null : "No fairway marked: everything counts as rough."].filter(Boolean) };
+    counts, fromSurfaceM2: fromSurface * C * C, defaults: { corridorM: routes.length ? CORRIDOR : 0, assumedTreesM2: assumedTrees * C * C, courseOutlineUsed: useCourse, assumedOBM2: assumedOB * C * C },
+    warnings: [T.length || fromSurface ? null : (routes.length && CORRIDOR > 0 ? `No trees marked: ground more than ${CORRIDOR} m from the line of play is assumed to be trees.` : "No trees marked: the caddie can't see any trees."),
+      useCourse ? "Outside the course boundary is treated as OB." : (COURSE.length ? "The course outline doesn't cover this hole, so it isn't used for OB." : null),
+      OBL.length || useCourse || fromSurface ? null : "No OB line marked.", F.length || fromSurface ? null : "No fairway marked: everything counts as rough.",
+      fromSurface ? "Unmarked ground comes from the auto-map (imagery): check it on the map." : null].filter(Boolean) };
 }
 
 /* ---------- the planner ---------- */

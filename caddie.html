@@ -91,7 +91,9 @@ details summary{cursor:pointer;font-weight:600;color:var(--ink2)}
       <button id="go">Find</button>
     </div>
     <div class="results" id="results"></div>
-    <div class="row"><button id="osmBtn" title="Load every hole of the course in view from OpenStreetMap">Load holes from OpenStreetMap</button></div>
+    <div class="row"><button id="osmBtn" title="Load every hole of the course in view from OpenStreetMap">Load holes from OpenStreetMap</button>
+      <button id="amBtn" title="Classify the satellite imagery around every hole">Auto-map course</button>
+      <button id="amShow" aria-pressed="false">Show auto-map</button></div>
     <p class="hint" id="osmNote" style="margin:4px 0 0"></p>
     <div class="row">
       <label>Hole <select id="hole"></select></label>
@@ -103,6 +105,7 @@ details summary{cursor:pointer;font-weight:600;color:var(--ink2)}
   <div class="body">
     <h2>Your plan</h2>
     <div id="plan" class="planbox"><p class="empty">Mark a tee and the green, and the caddie plans the hole.</p></div>
+    <p class="hint" style="font-size:12px">Auto-map colours: <b style="color:#5fae4a">fairway</b> · <b style="color:#b8d35a">green</b> · <b style="color:#46783a">rough</b> · <b style="color:#c9a84f">bunker</b> · <b style="color:#3b8fd6">water</b> · <b style="color:#1f4a2a">trees</b> · <b style="color:#c23bc2">OB</b> · <b style="color:#8a8a8a">uncertain</b></p>
     <div class="row" style="margin-top:8px">
       <button id="planTee">Plan from the tee</button>
       <button id="planMe">Plan from where I stand</button>
@@ -173,6 +176,7 @@ details summary{cursor:pointer;font-weight:600;color:var(--ink2)}
 <script src="https://api.mapbox.com/mapbox-gl-js/plugins/mapbox-gl-draw/v1.4.3/mapbox-gl-draw.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@turf/turf@7.1.0/turf.min.js"></script>
 <script src="caddie-engine.js"></script>
+<script src="caddie-automap.js"></script>
 <script>
 const TOKEN_KEY = "caddie-mapbox-token";
 const TOKEN = (()=>{try{return localStorage.getItem(TOKEN_KEY)||"";}catch{return "";}})();
@@ -394,7 +398,25 @@ $("fromTee").addEventListener("change", update);
 holeSel.addEventListener("change", () => { const pr=HOLE_PAR[hole()]; if(pr) $("par").value=String(pr); update(); fitHole(); });
 
 /* ---------- OpenStreetMap import ---------- */
-const PAR_KEY="caddie-hole-par-v1";
+const PAR_KEY="caddie-hole-par-v1", COURSE_KEY="caddie-course-outline-v1";
+let COURSE=[]; try{COURSE=JSON.parse(localStorage.getItem(COURSE_KEY))||[];}catch{}
+function outlineRings(elements){          // the course boundary: a closed way, or a relation made of pieces
+  const same=(a,b)=>a[0]===b[0]&&a[1]===b[1], rings=[];
+  for(const e of elements){
+    if(e.type==="way"&&e.tags&&e.tags.leisure==="golf_course"&&e.geometry){const g=e.geometry.map(p=>[p.lon,p.lat]);if(same(g[0],g[g.length-1]))rings.push(g);}
+    if(e.type==="relation"&&e.tags&&e.tags.leisure==="golf_course"&&e.members){
+      const pool=e.members.filter(m=>m.type==="way"&&m.role!=="inner"&&m.geometry).map(m=>m.geometry.map(p=>[p.lon,p.lat]));
+      let guard=0;
+      while(pool.length&&guard++<500){let ring=pool.shift(),grew=true;
+        while(!same(ring[0],ring[ring.length-1])&&grew&&guard++<5000){grew=false;
+          for(let i=0;i<pool.length;i++){const s=pool[i];
+            if(same(ring[ring.length-1],s[0]))ring=ring.concat(s.slice(1));
+            else if(same(ring[ring.length-1],s[s.length-1]))ring=ring.concat(s.slice(0,-1).reverse());
+            else continue;pool.splice(i,1);grew=true;break;}}
+        if(same(ring[0],ring[ring.length-1])&&ring.length>3)rings.push(ring);}}
+  }
+  return rings.map(r=>({type:"Feature",properties:{kind:"course"},geometry:{type:"Polygon",coordinates:[r]}}));
+}
 let HOLE_PAR={}; try{HOLE_PAR=JSON.parse(localStorage.getItem(PAR_KEY))||{};}catch{}
 $("osmBtn").addEventListener("click",osmImport);
 async function osmImport(){
@@ -403,7 +425,7 @@ async function osmImport(){
   const q=`[out:json][timeout:40];is_in(${c.lat},${c.lng})->.a;area.a[leisure=golf_course]->.c;
     (way(area.c)[golf];relation(area.c)[golf];way(area.c)[natural=water];way(area.c)[natural=wood];
      way(area.c)[landuse=forest];way(area.c)[natural=tree_row];);out geom tags;
-    area.a[leisure=golf_course];out tags;`;
+    area.a[leisure=golf_course];out tags;(way(pivot.c);relation(pivot.c););out geom;`;
   // the free OpenStreetMap servers are often busy: try several, and accept only real data
   const SERVERS=["https://overpass-api.de/api/interpreter","https://overpass.kumi.systems/api/interpreter","https://overpass.private.coffee/api/interpreter"];
   let r=null;
@@ -414,7 +436,8 @@ async function osmImport(){
   }
   if(!r){note.textContent="All OpenStreetMap servers are busy. Try again in a minute.";return;}
   const course=(r.elements.find(e=>e.type==="area")||{}).tags;
-  const ways=r.elements.filter(e=>e.type==="way"&&e.geometry);
+  COURSE=outlineRings(r.elements); try{localStorage.setItem(COURSE_KEY,JSON.stringify(COURSE));}catch{}
+  const ways=r.elements.filter(e=>e.type==="way"&&e.geometry&&!(e.tags&&e.tags.leisure==="golf_course"));
   const holes=ways.filter(w=>w.tags.golf==="hole"&&w.tags.ref);
   if(!holes.length){note.textContent="No mapped holes here. Centre the map on a golf course, or mark this course by hand.";return;}
   const line=w=>w.geometry.map(p=>[p.lon,p.lat]);
@@ -432,14 +455,14 @@ async function osmImport(){
     if(!haveGreenc.has(h.ref))add.push({type:"Feature",properties:{kind:"greenc",hole:h.ref,source:"osm"},geometry:{type:"Point",coordinates:h.g[h.g.length-1]}});
     if(h.par)HOLE_PAR[h.ref]=h.par;
   }
-  let n=0;
+  let n=0; const found={};
   for(const w of ways){
     const t=w.tags; let kind=KIND[t.golf]||(t.natural==="water"?"water":(t.natural==="wood"||t.landuse==="forest")?"trees":null);
     if(!kind||!closed(w))continue;
     const poly=turf.polygon([line(w)]); const ctr=turf.centroid(poly).geometry.coordinates;
     const nh=nearestHole(ctr); if(!nh||nh.d>(kind==="water"||kind==="trees"?60:45))continue;   // only features that belong to a hole
     if(kind==="teebox"){(teeBoxes[nh.ref]=teeBoxes[nh.ref]||[]).push(ctr);continue;}
-    add.push({type:"Feature",properties:{kind,hole:nh.ref,source:"osm"},geometry:poly.geometry});n++;
+    add.push({type:"Feature",properties:{kind,hole:nh.ref,source:"osm"},geometry:poly.geometry});n++;found[kind]=(found[kind]||0)+1;
   }
   // tees: drawn tee boxes if mapped (farthest = black, then blue, white, red); otherwise the start of the hole line
   for(const h of HL){if(haveTee.has(h.ref))continue;
@@ -452,9 +475,44 @@ async function osmImport(){
   try{localStorage.setItem(PAR_KEY,JSON.stringify(HOLE_PAR));}catch{}
   save(); const pr=HOLE_PAR[hole()]; if(pr)$("par").value=String(pr);
   update(); fitHole();
-  const detail=n?`${n} bunkers, greens, fairways, water or woods`:"no bunkers, greens or trees (mark them for better plans)";
-  note.textContent=`Loaded ${HL.length} holes of ${(course&&course.name)||"this course"} from OpenStreetMap: tees, greens, par and routing, plus ${detail}. © OpenStreetMap contributors.`;
+  const NAMES={water:"water hazard",bunker:"bunker",green:"green",fairway:"fairway",trees:"wooded area"};
+  const detail=n?Object.entries(found).map(([k,v])=>`${v} ${NAMES[k]||k}${v>1?"s":""}`).join(", "):"no hazards";
+  const outline=COURSE.length?" The course outline is used for OB on holes it fully covers.":" No course outline in OpenStreetMap.";
+  note.textContent=`Loaded ${HL.length} holes of ${(course&&course.name)||"this course"} from OpenStreetMap: tees, greens, par and routing, plus ${detail}.${outline} Unmarked ground far from each hole's line counts as trees until you mark it. © OpenStreetMap contributors.`;
 }
+
+/* ---------- auto-map from imagery ---------- */
+const SURF_KEY="caddie-surface-v1", AM=window.CaddieAutoMap;
+let SURFACE=null, SAMPLE=null;
+try{const s=localStorage.getItem(SURF_KEY); if(s){SURFACE=AM.unpack(s); SAMPLE=AM.sampler(SURFACE);}}catch{}
+function showSurface(on){
+  $("amShow").setAttribute("aria-pressed",on?"true":"false");
+  if(!SURFACE){return;}
+  if(!map.getSource("am")){const ov=AM.overlay(SURFACE);
+    map.addSource("am",{type:"image",url:ov.url,coordinates:ov.coordinates});
+    map.addLayer({id:"am",type:"raster",source:"am",paint:{"raster-opacity":.72,"raster-resampling":"nearest"}},map.getLayer("gl-draw-polygon-fill-inactive.cold")?"gl-draw-polygon-fill-inactive.cold":undefined);}
+  map.setLayoutProperty("am","visibility",on?"visible":"none");
+}
+$("amShow").addEventListener("click",()=>{if(!SURFACE){$("osmNote").textContent="Run Auto-map course first.";return;}showSurface($("amShow").getAttribute("aria-pressed")!=="true");});
+$("amBtn").addEventListener("click",async()=>{
+  const note=$("osmNote"), all=draw.getAll().features;
+  const routes=all.filter(f=>f.properties.kind==="holeline").map(f=>f.geometry.coordinates);
+  if(!routes.length){note.textContent="Load the holes from OpenStreetMap first (the auto-map follows each hole's line of play).";return;}
+  const greens=all.filter(f=>f.properties.kind==="greenc").map(f=>f.geometry.coordinates);
+  const water=all.filter(f=>f.properties.kind==="water"&&f.geometry.type==="Polygon").map(f=>f.geometry.coordinates[0]);
+  const bb=turf.bbox(turf.featureCollection(routes.map(r=>turf.lineString(r)))), m=.0006;
+  try{
+    const M=await AM.fetchMosaic([bb[0]-m,bb[1]-m,bb[2]+m,bb[3]+m],TOKEN,17,256,(d,n)=>note.textContent=`Downloading imagery ${d}/${n}…`);
+    note.textContent="Reading the imagery…"; await new Promise(r=>setTimeout(r,30));
+    SURFACE=AM.classify(M,{routes,greens,water}); SAMPLE=AM.sampler(SURFACE);
+    try{localStorage.setItem(SURF_KEY,AM.pack(SURFACE));}catch{note.textContent="Auto-map made, but too big to save on this device: it lasts until you close the page.";}
+    if(map.getSource("am")){const ov=AM.overlay(SURFACE);map.getSource("am").updateImage({url:ov.url,coordinates:ov.coordinates});}
+    showSurface(true);
+    const a=SURFACE.areasM2,ha=k=>((a[k]||0)/1e4).toFixed(1);
+    note.textContent=`Auto-mapped from imagery: fairway ${ha("F")} ha, greens ${ha("G")} ha, bunkers ${ha("S")} ha, trees ${ha("T")} ha, uncertain ${ha("U")} ha. Water comes only from OpenStreetMap or your marks. Check it with Show auto-map; anything you mark overrides it.`;
+    schedulePlan();
+  }catch(e){note.textContent="Auto-map failed: "+e.message;}
+});
 
 /* ---------- AI caddie ---------- */
 const BAG_KEY="caddie-bag-v1";
@@ -485,7 +543,7 @@ function runPlan(){
   setTimeout(()=>{
     let H,C,p;
     try{
-      H=E.buildHole(fc,hole(),$("fromTee").value||ts[0].properties.tee);
+      H=E.buildHole({type:"FeatureCollection",features:[...fc.features,...COURSE]},hole(),$("fromTee").value||ts[0].properties.tee,{surface:SAMPLE||undefined});
       C=E.makeCaddie(H,{bag:BAG,off:+$("off").value/100,treeH:+$("treeH").value,disp:+$("disp").value/100,missM:+$("miss").value});
       if(fromMe){const [x,y]=H.P.to(me);if(H.lie(x,y)==="X"){$("plan").innerHTML='<p class="empty warn">You are outside the mapped hole. Stand on the hole, or plan from the tee.</p>';return;}
         p=C.planFrom(x,y);} else p=C.planTee();
