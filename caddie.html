@@ -758,7 +758,9 @@ function fitHole() {
   const bb = turf.bbox({ type: "FeatureCollection", features: fs });
   map.fitBounds(bb, { padding: { top: 60, bottom: 60, left: window.innerWidth >= 760 ? 400 : 40, right: 60 }, maxZoom: 18.5 });
 }
-map.on("load", () => { load(); update(); fitHole(); });
+map.on("load", () => { load(); update(); fitHole();
+  map.once("idle", () => { update(); fitHole(); });   // plan again once saved holes and tiles have settled
+});
 map.on("error", e => {
   const msg = (e && e.error && e.error.message) || "";
   if (/401|403|token/i.test(msg)) $("hint").innerHTML = `<span class="warn">Mapbox rejected the access token. Check it on the Tokens page, and that this site's address is allowed.</span>`;
