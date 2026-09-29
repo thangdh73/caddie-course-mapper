@@ -219,7 +219,8 @@ function makeCaddie(hole, opts = {}) {
   function sampleShot(x, y, club, aimX, aimY, fromTee) {
     const carry = plays(club[1]), rad = club[2] * S.disp;
     const dx = aimX - x, dy = aimY - y, L = Math.hypot(dx, dy) || 1, ex = dx / L, ey = dy / L, qx = ey, qy = -ex; // q = right
-    let al = carry + gauss() * Math.max(4, carry * .042 * S.disp); let lat = gauss() * rad / 2 + S.missM;
+    // distance control for a ~12 handicap: about 7% of carry (tour players ~4%), scaled by 'how you're striking it'
+    let al = carry + gauss() * Math.max(4, carry * .07 * S.disp); let lat = gauss() * rad / 2 + S.missM;
     if (club[0] !== "Punch" && club[0] !== "Chip" && rnd() < mishitP(club)) { al = carry * (.55 + .3 * rnd()); lat *= 1.6; }
     let nx = x + ex * al + qx * lat, ny = y + ey * al + qy * lat;
     if (S.elev) {                               // landing higher = the ball comes down sooner
@@ -246,11 +247,12 @@ function makeCaddie(hole, opts = {}) {
     return [x + ex * c + ey * off, y + ey * c - ex * off];
   }
   function evDist(x, y, club, off, N, fromTee, tgt) {
-    const [ax, ay] = aimPoint(x, y, club, off, tgt), v = new Float64Array(N);
-    for (let i = 0; i < N; i++) v[i] = 1 + outcomeValue(sampleShot(x, y, club, ax, ay, fromTee), x, y);
+    const [ax, ay] = aimPoint(x, y, club, off, tgt), v = new Float64Array(N); let trouble = 0;
+    for (let i = 0; i < N; i++) { const o = sampleShot(x, y, club, ax, ay, fromTee); v[i] = 1 + outcomeValue(o, x, y);
+      if (o.k === "hit" || o.k === "T" || o.k === "S" || o.k === "W" || o.k === "O" || o.k === "X") trouble++; }
     v.sort(); let m = 0; for (const a of v) m += a; m /= N;
     const q = p => v[Math.min(N - 1, Math.floor(p * N))];
-    return { mean: m, good: q(.25), bad: q(.80) };
+    return { mean: m, good: q(.25), bad: q(.80), trouble: trouble / N };
   }
   /* play a whole hole out: first shot as given, then the best shot for wherever the ball lies */
   function putts(d) {
@@ -279,10 +281,10 @@ function makeCaddie(hole, opts = {}) {
     return strokes + 2;
   }
   function scorecard(x, y, club, off, tgt, fromTee, P) {
-    let sum = 0, birdie = 0, dbl = 0;
+    let sum = 0, birdie = 0, bogey = 0, dbl = 0;
     for (let i = 0; i < P; i++) { const s = playOut(x, y, { c: club, a: off, tgt }, fromTee); sum += s;
-      if (s <= S.par - 1) birdie++; if (s >= S.par + 2) dbl++; }
-    return { avg: sum / P, pBirdie: birdie / P, pDouble: dbl / P };
+      if (s <= S.par - 1) birdie++; if (s >= S.par + 1) bogey++; if (s >= S.par + 2) dbl++; }
+    return { avg: sum / P, pBirdie: birdie / P, pBogey: bogey / P, pDouble: dbl / P };
   }
   /* the three strategies rank the same simulated outcomes differently:
      optimise = lowest average; safe = lowest bad-day score (80th percentile);
@@ -290,8 +292,20 @@ function makeCaddie(hole, opts = {}) {
      breaks ties so neither extreme picks something silly. */
   /* strategies judged on whole-hole scorecards:
      optimise = lowest average; safe = fewest doubles or worse; aggressive = most birdies.
-     a double counts as 3 extra strokes for Safe, a birdie as 3 saved for Aggressive. */
-  const SCORE = { optimise: c => c.avg, safe: c => c.avg + 3 * c.pDouble, aggressive: c => c.avg - 3 * c.pBirdie };
+     Safe: each chance of bogey-or-worse costs 2 extra, of double-or-worse 4 more. Aggressive: a birdie is worth 4. */
+  /* strategies by style, each allowed to cost at most STYLE_COST strokes over the best average:
+     aggressive = the boldest play (longest club, then nearest the flag line, then most birdies);
+     safe = fewest doubles-or-worse for the hole plus half this shot's trouble rate (trees, sand, water, OB);
+     optimise = the lowest average. */
+  const STYLE_COST = .3;
+  const PICK = {
+    optimise: list => list.slice().sort((a, b) => a.avg - b.avg)[0],
+    aggressive: list => { const b = Math.min(...list.map(o => o.avg)); return list.filter(o => o.avg <= b + STYLE_COST)
+      .sort((a, c) => c.club[1] - a.club[1] || Math.abs(a.off) - Math.abs(c.off) || c.pBirdie - a.pBirdie)[0]; },
+    safe: list => { const b = Math.min(...list.map(o => o.avg)); return list.filter(o => o.avg <= b + STYLE_COST)
+      .sort((a, c) => (a.pDouble + .5 * a.trouble) - (c.pDouble + .5 * c.trouble) || a.avg - c.avg)[0]; }
+  };
+  const SCORE = { optimise: c => c.avg, safe: c => c.avg, aggressive: c => c.avg };
   const RANK = { optimise: d => d.mean, safe: d => d.mean, aggressive: d => d.mean };
   function ev(x, y, club, off, N, fromTee, tgt) {
     const [ax, ay] = aimPoint(x, y, club, off, tgt);
@@ -304,6 +318,11 @@ function makeCaddie(hole, opts = {}) {
     const bag = S.bag.filter(c => fromTee || c[0] !== "Driver");
     const c = bag.filter(q => q[1] <= d + 18).sort((a, b) => Math.abs(a[1] - d) - Math.abs(b[1] - d)).slice(0, 4);
     if (d > 190) for (const q of bag.slice(0, 2)) if (!c.includes(q)) c.push(q);
+    // lay-ups: the clubs that leave roughly 70, 100 and 130 m to the flag
+    if (d > 150) for (const leave of [70, 100, 130]) {
+      const want = d - leave, q = bag.filter(b => b[1] <= want + 10 && b[0] !== "Chip").sort((a, b) => Math.abs(a[1] - want) - Math.abs(b[1] - want))[0];
+      if (q && !c.includes(q)) c.push(q);
+    }
     return c.length ? c : [bag[bag.length - 1]];
   }
   // seed, then sweep backwards-in-effect (value iteration)
@@ -345,14 +364,23 @@ function makeCaddie(hole, opts = {}) {
     // screen by average, then play the best ten out to the last putt
     tried.sort((a, b) => a.mean - b.mean);
     const pool = [], seen = new Set();
-    for (const o of tried) { const k = o.club[0] + "|" + (o.tgt ? "c" : "f") + "|" + Math.round(o.off / 9); if (seen.has(k)) continue; seen.add(k); pool.push(o); if (pool.length >= 10) break; }
-    for (const o of pool) Object.assign(o, scorecard(x, y, o.club, o.off, o.tgt, fromTee, fromTee ? 150 : 90));
+    const add = o => { const k = o.club[0] + "|" + (o.tgt ? "c" : "f") + "|" + o.off; if (!seen.has(k)) { seen.add(k); pool.push(o); } };
+    tried.slice(0, 10).forEach(add);                                        // best averages overall
+    const byClub = new Map(); for (const o of tried) { if (!byClub.has(o.club[0])) byClub.set(o.club[0], []); byClub.get(o.club[0]).push(o); }
+    for (const list of byClub.values()) {                                   // every club gets a fair hearing
+      add(list[0]);                                                         // its best average
+      const floor = list[0].mean + .5;                                      // and its least-trouble aim, if not silly
+      const calm = list.filter(o => o.mean <= floor).sort((a, b) => a.trouble - b.trouble || a.mean - b.mean)[0];
+      if (calm) add(calm);
+    }
+    for (const o of pool) Object.assign(o, scorecard(x, y, o.club, o.off, o.tgt, fromTee, fromTee ? 200 : 100));
     const out = {};
     for (const [name, rank] of Object.entries(SCORE)) {
-      const perClub = new Map();
-      for (const o of pool) { const k = o.club[0], s = rank(o); if (!perClub.has(k) || s < perClub.get(k).s) perClub.set(k, Object.assign({ s }, o)); }
-      const ranked = [...perClub.values()].sort((a, b) => a.s - b.s);
-      const best = ranked[0];
+      const best = PICK[name](pool);
+      const perClub = new Map();                // the comparison table: each club's best by average
+      for (const o of pool) { const k = o.club[0]; if (!perClub.has(k) || o.avg < perClub.get(k).avg) perClub.set(k, o); }
+      perClub.set(best.club[0], best);
+      const ranked = [best, ...[...perClub.values()].filter(o => o !== best).sort((a, b) => a.avg - b.avg)];
       const options = ranked.slice(0, 3).map(o => Object.assign({}, o, { v: o.mean, mix: mix(x, y, o.club, o.off, 400, fromTee, o.tgt) }));
       const [ax, ay] = aimPoint(x, y, best.club, best.off, best.tgt);
       const cloud = []; for (let i = 0; i < 160; i++) cloud.push(sampleShot(x, y, best.club, ax, ay, fromTee));
@@ -365,9 +393,13 @@ function makeCaddie(hole, opts = {}) {
         }
         // strategy matters most for go-for-it decisions: re-rank this shot's two best options on full play-outs
         const alts = []; for (const c of candidates(cx, cy, cl, false)) for (const a of [-6, 0, 6]) alts.push({ c, a, m: evDist(cx, cy, c, a, 30, false).mean });
-        alts.sort((p, q) => p.m - q.m); const shortlist = alts.slice(0, 4);
-        let pick = null; for (const o of shortlist) { const sc = scorecard(cx, cy, o.c, o.a, null, false, 60), s = rank(sc); if (!pick || s < pick.s) pick = { s, c: o.c, a: o.a }; }
-        if (pick) { nb.c = pick.c; nb.a = pick.a; }
+        alts.sort((p, q) => p.m - q.m);
+        // keep the best few AND the best of each club, so a lay-up is always weighed against going for it
+        const shortlist = alts.slice(0, 5), have = new Set(shortlist.map(o => o.c[0]));
+        for (const o of alts) if (!have.has(o.c[0])) { have.add(o.c[0]); shortlist.push(o); }
+        const scored = shortlist.map(o => Object.assign({ club: o.c, off: o.a, trouble: evDist(cx, cy, o.c, o.a, 60, false).trouble }, scorecard(cx, cy, o.c, o.a, null, false, 100)));
+        const pick = PICK[name](scored);
+        if (pick) { nb.c = pick.club; nb.a = pick.off; }
         const [nx, ny] = aimPoint(cx, cy, nb.c, nb.a);
         chain.push({ club: nb.c[0], carry: Math.round(plays(nb.c[1])), from: [cx, cy], aim: [nx, ny] });
         if (Math.hypot(nx - cx, ny - cy) < 3) break;
@@ -375,12 +407,25 @@ function makeCaddie(hole, opts = {}) {
       }
       chain.forEach(s => { s.lie = NAME[hole.lie(...s.aim)] || "rough"; s.left = Math.round(dPin(...s.aim)); s.rise = Math.round(rise(...s.from, ...s.aim)); });
       out[name] = { best: Object.assign({ v: best.avg }, best), options: options.map(o => Object.assign(o, { v: o.avg })), cloud, chain,
-        expected: best.avg, pBirdie: best.pBirdie, pDouble: best.pDouble, toPin: dNow };
+        expected: best.avg, pBirdie: best.pBirdie, pBogey: best.pBogey, pDouble: best.pDouble, toPin: dNow };
     }
+    const same = (a, b) => a.best.club[0] === b.best.club[0] && Math.abs(a.best.off - b.best.off) <= 3 && !!a.best.tgt === !!b.best.tgt;
+    const agree = same(out.safe, out.optimise) && same(out.aggressive, out.optimise);
     const o = out.optimise;                     // the default plan keeps its old shape
-    return Object.assign({}, o, { strategies: out, climb: zPin != null && Z(x, y) != null ? Math.round(zPin - Z(x, y)) : null });
+    return Object.assign({}, o, { strategies: out, agree, climb: zPin != null && Z(x, y) != null ? Math.round(zPin - Z(x, y)) : null });
   }
-  return { planTee: () => planFrom(0, 0, true), planFrom: (x, y) => planFrom(x, y, false), lie: hole.lie, es };
+  /* per-club look at the tee shot: best aim by average, then full play-outs */
+  function teeByClub(P = 300) {
+    const offs = []; for (let a = -36; a <= 36; a += 3) offs.push(a);
+    const targets = [null, ...(hole.via || []).filter(v => dPin(...v) < dPin(0, 0) - 20 && Math.hypot(...v) > 60)];
+    return S.bag.filter(c => c[1] <= dPin(0, 0) + 25).map(c => {
+      let best = null;
+      for (const tg of targets) for (const a of offs) { const d = evDist(0, 0, c, a, 120, true, tg); if (!best || d.mean < best.mean) best = Object.assign({ off: a, tgt: tg }, d); }
+      const sc = scorecard(0, 0, c, best.off, best.tgt, true, P);
+      return { club: c[0], off: best.off, corner: !!best.tgt, avg: sc.avg, pBirdie: sc.pBirdie, pDouble: sc.pDouble };
+    });
+  }
+  return { teeByClub, planTee: () => planFrom(0, 0, true), planFrom: (x, y) => planFrom(x, y, false), lie: hole.lie, es };
 }
 
 const api = { DEFAULT_BAG, NAME, buildHole, makeCaddie, projector };

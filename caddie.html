@@ -659,13 +659,17 @@ function showPlan(H,pAll){
   const p=pAll.strategies?Object.assign({},pAll,pAll.strategies[STRAT]):pAll;
   const b=p.best,pc=v=>Math.round(100*(v||0))+"%",m=b.mix||p.options[0].mix;
   const S3=pAll.strategies||{}, NAMES={aggressive:"Aggressive",optimise:"Optimise",safe:"Safe"};
-  const cmp=Object.keys(NAMES).filter(k=>S3[k]).map(k=>{const q=S3[k];
-    return `<tr${k===STRAT?' style="font-weight:600"':''}><td>${NAMES[k]}</td><td>${q.best.club[0]}</td><td>${q.expected.toFixed(2)}</td><td>${pc(q.pBirdie)}</td><td>${pc(q.pDouble)}</td></tr>`;}).join("");
+  const base=S3.optimise?S3.optimise.expected:0;
+  const aimOf=q=>q.best.tgt?"corner":(q.best.off?`${Math.abs(q.best.off)}${q.best.off>0?"R":"L"}`:"flag");
+  const cmp=Object.keys(NAMES).filter(k=>S3[k]).map(k=>{const q=S3[k],d=q.expected-base;
+    return `<tr${k===STRAT?' style="font-weight:600"':''}><td>${NAMES[k]}</td><td>${q.best.club[0]} · ${aimOf(q)}</td><td>${q.expected.toFixed(2)}${k!=="optimise"&&Math.abs(d)>=.01?` (${d>0?"+":""}${d.toFixed(2)})`:""}</td><td>${pc(q.pBirdie)}</td><td>${pc(q.pDouble)}</td></tr>`;}).join("");
+  const agreeNote=pAll.agree?`<p class="empty" style="margin:2px 0 6px">All three agree on this hole: the best-average play is also the boldest and the safest within reach, so there's nothing to trade.</p>`:
+    `<p class="empty" style="margin:2px 0 6px">Aggressive is the boldest play and Safe the one with least trouble, each within 0.3 strokes of the best average.</p>`;
   const climb=pAll.climb;
   const rows=p.options.map((o,i)=>`<tr${i?"":' style="font-weight:600"'}><td>${o.club[0]}</td><td>${o.v.toFixed(2)}</td><td>${pc(o.mix.F)}</td><td>${pc((o.mix.R||0)+(o.mix.S||0))}</td><td>${pc(o.mix.T)}</td><td>${pc((o.mix.O||0)+(o.mix.X||0))}</td></tr>`).join("");
   $("plan").innerHTML=`<div class="rec">${b.club[0]} · ${Math.round(b.club[1])} m</div>
     <div class="sub">Aim ${sideText(b)}. Average ${p.expected.toFixed(2)}${fromMe?` from ${Math.round(p.toPin)} m`:" for the hole"}${climb!=null&&Math.abs(climb)>=2?` · plays ${climb>0?"uphill":"downhill"} ${Math.abs(climb)} m`:""}.</div>
-    <table style="margin:6px 0 2px"><tr><th>Strategy</th><th>Tee club</th><th>Average</th><th>Birdie+</th><th>Double+</th></tr>${cmp}</table>
+    <table style="margin:6px 0 2px"><tr><th>Strategy</th><th>First shot</th><th>Average</th><th>Birdie+</th><th>Double+</th></tr>${cmp}</table>${agreeNote}
     <ol>${p.chain.map(s=>`<li>${s.club} ${s.carry} m → ${s.left} m left, ${s.lie}${s.rise&&Math.abs(s.rise)>=3?` (${s.rise>0?"+":""}${s.rise} m)`:""}</li>`).join("")}</ol>
     <table style="margin-top:6px"><tr><th>Option</th><th>Score</th><th>Fairway</th><th>Rough/sand</th><th>Trees</th><th>OB</th></tr>${rows}</table>
     ${H.warnings.length?`<p class="empty warn" style="margin-top:6px">${H.warnings.join(" ")}</p>`:""}`;
