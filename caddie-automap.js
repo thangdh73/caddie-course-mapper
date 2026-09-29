@@ -76,13 +76,14 @@ function classify(M, anchors, onStep) {
   const cls = new Uint8Array(N).fill(CODE.R);
   for (let i = 0; i < N; i++) {
     const v = V[i], s = Sat[i], hu = Hue[i], sd = t2.sd[i], r = px[i * 4], b = px[i * 4 + 2];
-    const greenish = hu >= 55 && hu <= 170 && ExG[i] > 0.02;
+    // grass includes dry, tan turf: measured fairway hue 42-104 (p10-p90), saturation 0.30-0.42
+    const greenish = hu >= 35 && hu <= 170 && ExG[i] > -0.03 && s >= 0.15;
     /* thresholds calibrated on Mapbox imagery against the verified Hole 1 map (Seri Selangor):
        bunkers V 0.64-0.89, S 0.18-0.24, hue 32-51; fairway V 0.36-0.56; trees V 0.19-0.46, hue 63-129 */
     if (v > 0.64 && s < 0.27 && hu >= 20 && hu <= 60 && ExG[i] < 0.06) { cls[i] = CODE.S; continue; }         // sand
     if (v < 0.30 && Bs[i] > 0.33 && sd < 9) { cls[i] = CODE.U; continue; }                                      // shade: can't tell
     if (v < 0.33 || (v < 0.42 && hu > 95) || (v < 0.46 && sd > 14 && greenish)) { cls[i] = CODE.T; continue; } // canopy
-    const roof = (s > 0.28 && (hu < 38 || hu > 300) && v > 0.35) || (s < 0.11 && v > 0.40 && !greenish);         // roofs, roads, paths
+    const roof = (s > 0.30 && (hu < 30 || hu > 300) && v > 0.35) || (s < 0.11 && v > 0.40 && !greenish);         // roofs, roads, paths
     if (roof) { cls[i] = dR(i) > 30 ? CODE.O : CODE.U; continue; }
     if (!greenish) { cls[i] = CODE.U; continue; }
   }
@@ -148,7 +149,7 @@ function pack(S) {                              // run-length encode for storage
   const out = []; let prev = S.codes[0], run = 0;
   for (let i = 0; i < S.codes.length; i++) { if (S.codes[i] === prev && run < 65535) run++; else { out.push(prev, run); prev = S.codes[i]; run = 1; } }
   out.push(prev, run);
-  return JSON.stringify({ W: S.W, H: S.H, z: S.z, tx0: S.tx0, ty0: S.ty0, T: S.T, mpp: S.mpp, areasM2: S.areasM2, rle: out });
+  return JSON.stringify({ W: S.W, H: S.H, z: S.z, tx0: S.tx0, ty0: S.ty0, T: S.T, mpp: S.mpp, areasM2: S.areasM2, edited: !!S.edited, rle: out });
 }
 function unpack(txt) { const o = JSON.parse(txt), codes = new Uint8Array(o.W * o.H); let k = 0;
   for (let i = 0; i < o.rle.length; i += 2) { codes.fill(o.rle[i], k, k + o.rle[i + 1]); k += o.rle[i + 1]; }

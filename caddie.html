@@ -65,6 +65,8 @@ details summary{cursor:pointer;font-weight:600;color:var(--ink2)}
 #tokenGate[hidden]{display:none}
 .gatebox{background:var(--paper);border-radius:14px;padding:18px 18px 12px;max-width:440px;width:100%}
 .gatebox h2{margin:0 0 8px;font-size:20px}.gatebox input{width:100%;margin:6px 0 8px}.gatebox .small{font-size:13px;color:var(--ink2)}
+.pal{grid-template-columns:repeat(4,1fr)}
+.paint.on{outline:2px solid var(--turf2);border-radius:10px;padding:4px}
 .foot{font-size:13px;color:var(--ink2);padding:8px 14px 10px;border-top:1px solid var(--line)}
 .warn{color:var(--warn)}
 .mapboxgl-ctrl-group button{width:36px;height:36px}
@@ -124,6 +126,26 @@ details summary{cursor:pointer;font-weight:600;color:var(--ink2)}
         <textarea id="bag" rows="7"></textarea></label>
       <button id="bagSave">Use this bag</button>
     </details>
+
+    <h2>Fix the auto-map</h2>
+    <div class="paint" id="paint">
+      <div class="tools pal" id="pal">
+        <button data-c="1"><i class="sw" style="background:#7ee06a"></i>Fairway</button>
+        <button data-c="0"><i class="sw" style="background:#46783a"></i>Rough</button>
+        <button data-c="5"><i class="sw" style="background:#e9ff9a"></i>Green</button>
+        <button data-c="2"><i class="sw" style="background:#f2d27a"></i>Bunker</button>
+        <button data-c="3"><i class="sw" style="background:#3b8fd6"></i>Water</button>
+        <button data-c="4"><i class="sw" style="background:#143c1e"></i>Trees</button>
+        <button data-c="6"><i class="sw" style="background:#d63bd6"></i>OB</button>
+        <button data-c="7"><i class="sw" style="background:#dddddd"></i>Uncertain</button>
+      </div>
+      <div class="row" style="margin-top:6px">
+        <button id="pBrush" aria-pressed="true">Brush</button><button id="pFill" aria-pressed="false">Fill patch</button>
+        <label class="row" style="gap:4px;flex:1">Size <input id="pSize" type="range" min="1" max="15" value="4" style="flex:1"><span id="pSizeV">4 m</span></label>
+      </div>
+      <div class="row" style="margin-top:6px"><button id="pUndo">Undo</button><button id="pDone">Stop painting</button></div>
+      <p class="hint" id="pNote">Pick a surface, then drag on the map. Fill patch: tap one wrong patch to change all of it.</p>
+    </div>
 
     <h2>Mark the hole</h2>
     <div class="tools" id="tools">
@@ -495,6 +517,7 @@ function showSurface(on){
 }
 $("amShow").addEventListener("click",()=>{if(!SURFACE){$("osmNote").textContent="Run Auto-map course first.";return;}showSurface($("amShow").getAttribute("aria-pressed")!=="true");});
 $("amBtn").addEventListener("click",async()=>{
+  if(SURFACE&&SURFACE.edited&&!confirm("Re-running the auto-map replaces the fixes you painted. Continue?"))return;
   const note=$("osmNote"), all=draw.getAll().features;
   const routes=all.filter(f=>f.properties.kind==="holeline").map(f=>f.geometry.coordinates);
   if(!routes.length){note.textContent="Load the holes from OpenStreetMap first (the auto-map follows each hole's line of play).";return;}
@@ -513,6 +536,51 @@ $("amBtn").addEventListener("click",async()=>{
     schedulePlan();
   }catch(e){note.textContent="Auto-map failed: "+e.message;}
 });
+
+/* ---------- fix the auto-map: brush and fill ---------- */
+let paintC=null, paintMode="brush", painting=false, stroke=null, undo=[], lastRedraw=0;
+const lon2x=(lon,z)=>(lon+180)/360*2**z, lat2y=(lat,z)=>{const r=lat*Math.PI/180;return(1-Math.log(Math.tan(r)+1/Math.cos(r))/Math.PI)/2*2**z;};
+const toPix=ll=>[Math.floor((lon2x(ll.lng,SURFACE.z)-SURFACE.tx0)*SURFACE.T),Math.floor((lat2y(ll.lat,SURFACE.z)-SURFACE.ty0)*SURFACE.T)];
+$("pSize").addEventListener("input",()=>$("pSizeV").textContent=$("pSize").value+" m");
+$("pBrush").addEventListener("click",()=>{paintMode="brush";$("pBrush").setAttribute("aria-pressed","true");$("pFill").setAttribute("aria-pressed","false");});
+$("pFill").addEventListener("click",()=>{paintMode="fill";$("pFill").setAttribute("aria-pressed","true");$("pBrush").setAttribute("aria-pressed","false");});
+document.querySelectorAll("#pal button").forEach(b=>b.addEventListener("click",()=>{
+  if(!SURFACE){$("pNote").textContent="Run Auto-map course first.";return;}
+  document.querySelectorAll("#pal button").forEach(x=>x.setAttribute("aria-pressed","false"));
+  b.setAttribute("aria-pressed","true"); paintC=+b.dataset.c; $("paint").classList.add("on");
+  draw.changeMode("simple_select"); map.dragPan.disable(); showSurface(true);
+  $("pNote").textContent=paintMode==="fill"?"Tap a patch to change it.":"Drag on the map to paint. Stop painting to move the map again.";
+}));
+function stopPaint(){paintC=null;$("paint").classList.remove("on");map.dragPan.enable();
+  document.querySelectorAll("#pal button").forEach(x=>x.setAttribute("aria-pressed","false"));
+  $("pNote").textContent="Pick a surface, then drag on the map. Fill patch: tap one wrong patch to change all of it.";}
+$("pDone").addEventListener("click",stopPaint);
+function redraw(force){const now=Date.now(); if(!force&&now-lastRedraw<200)return; lastRedraw=now;
+  const ov=AM.overlay(SURFACE); map.getSource("am")&&map.getSource("am").updateImage({url:ov.url,coordinates:ov.coordinates});}
+function setCell(i){if(SURFACE.codes[i]===paintC)return; stroke.push(i,SURFACE.codes[i]); SURFACE.codes[i]=paintC;}
+function dab(ll){const [x,y]=toPix(ll), r=Math.max(1,Math.round(+$("pSize").value/2/SURFACE.mpp));
+  for(let dy=-r;dy<=r;dy++)for(let dx=-r;dx<=r;dx++){if(dx*dx+dy*dy>r*r)continue;const X=x+dx,Y=y+dy;
+    if(X<0||Y<0||X>=SURFACE.W||Y>=SURFACE.H)continue; setCell(Y*SURFACE.W+X);}}
+function fill(ll){const [x,y]=toPix(ll); if(x<0||y<0||x>=SURFACE.W||y>=SURFACE.H)return;
+  const W=SURFACE.W,H=SURFACE.H,from=SURFACE.codes[y*W+x]; if(from===paintC)return;
+  const LIMIT=Math.round(10000/(SURFACE.mpp*SURFACE.mpp));      // 1 hectare: a fix, not a repaint of the course
+  const st=[y*W+x]; let n=0;
+  while(st.length){const i=st.pop(); if(SURFACE.codes[i]!==from)continue; setCell(i); n++;
+    if(n>LIMIT){for(let k=stroke.length-2;k>=0;k-=2)SURFACE.codes[stroke[k]]=stroke[k+1]; stroke.length=0;
+      $("pNote").textContent="That patch is bigger than a hectare, so nothing was changed. Zoom in and use the brush, or tap a smaller patch."; return;}
+    const X=i%W,Y=(i/W)|0; if(X>0)st.push(i-1); if(X<W-1)st.push(i+1); if(Y>0)st.push(i-W); if(Y<H-1)st.push(i+W);}
+  $("pNote").textContent=`Changed a ${Math.round(n*SURFACE.mpp*SURFACE.mpp)} m² patch.`;}
+function endStroke(){if(!painting)return; painting=false;
+  if(stroke&&stroke.length){undo.push(stroke); if(undo.length>40)undo.shift(); SURFACE.edited=true; saveSurface(); redraw(true); schedulePlan();}
+  stroke=null;}
+function saveSurface(){try{localStorage.setItem(SURF_KEY,AM.pack(SURFACE));}catch{$("pNote").textContent="Couldn't save the fixes on this device.";}}
+const down=e=>{if(paintC===null||!SURFACE)return; e.preventDefault&&e.preventDefault(); painting=true; stroke=[];
+  if(paintMode==="fill"){fill(e.lngLat); endStroke();} else {dab(e.lngLat); redraw();}};
+const move=e=>{if(!painting||paintMode!=="brush")return; dab(e.lngLat); redraw();};
+map.on("mousedown",down); map.on("touchstart",down); map.on("mousemove",move); map.on("touchmove",move);
+map.on("mouseup",endStroke); map.on("touchend",endStroke); window.addEventListener("mouseup",endStroke);
+$("pUndo").addEventListener("click",()=>{const s=undo.pop(); if(!s){$("pNote").textContent="Nothing to undo.";return;}
+  for(let k=s.length-2;k>=0;k-=2)SURFACE.codes[s[k]]=s[k+1]; saveSurface(); redraw(true); schedulePlan(); $("pNote").textContent="Undone.";});
 
 /* ---------- AI caddie ---------- */
 const BAG_KEY="caddie-bag-v1";
