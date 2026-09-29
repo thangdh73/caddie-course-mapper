@@ -67,6 +67,7 @@ details summary{cursor:pointer;font-weight:600;color:var(--ink2)}
 .gatebox h2{margin:0 0 8px;font-size:20px}.gatebox input{width:100%;margin:6px 0 8px}.gatebox .small{font-size:13px;color:var(--ink2)}
 .pal{grid-template-columns:repeat(4,1fr)}
 .paint.on{outline:2px solid var(--turf2);border-radius:10px;padding:4px}
+.seg button{flex:1}
 .foot{font-size:13px;color:var(--ink2);padding:8px 14px 10px;border-top:1px solid var(--line)}
 .warn{color:var(--warn)}
 .mapboxgl-ctrl-group button{width:36px;height:36px}
@@ -106,6 +107,9 @@ details summary{cursor:pointer;font-weight:600;color:var(--ink2)}
 
   <div class="body">
     <h2>Your plan</h2>
+    <div class="row seg" id="strat" style="margin-bottom:6px">
+      <button data-s="aggressive">Aggressive</button><button data-s="optimise" aria-pressed="true">Optimise</button><button data-s="safe">Safe</button>
+    </div>
     <div id="plan" class="planbox"><p class="empty">Mark a tee and the green, and the caddie plans the hole.</p></div>
     <p class="hint" style="font-size:12px">Auto-map colours: <b style="color:#5fae4a">fairway</b> · <b style="color:#b8d35a">green</b> · <b style="color:#46783a">rough</b> · <b style="color:#c9a84f">bunker</b> · <b style="color:#3b8fd6">water</b> · <b style="color:#1f4a2a">trees</b> · <b style="color:#c23bc2">OB</b> · <b style="color:#8a8a8a">uncertain</b></p>
     <div class="row" style="margin-top:8px">
@@ -119,6 +123,9 @@ details summary{cursor:pointer;font-weight:600;color:var(--ink2)}
         <input id="treeH" type="range" min="6" max="30" step="1" value="15"></label>
       <label class="slab">How you're striking it <span id="vDisp">normal</span>
         <input id="disp" type="range" min="70" max="140" step="5" value="100"></label>
+      <label class="slab">Bad strikes (tops, thins, chunks) <span id="vMis">normal for a 12</span>
+        <input id="mis" type="range" min="0" max="200" step="25" value="100"></label>
+      <label class="slab"><input id="useElev" type="checkbox" checked style="width:auto;display:inline"> Use elevation (uphill plays longer) — Mapbox terrain, good for hole-scale slope, not green reading</label>
       <label class="slab">Usual miss
         <select id="miss"><option value="0">straight</option><option value="4">slight fade (right)</option>
         <option value="8">big fade (right)</option><option value="-4">slight draw (left)</option><option value="-8">big draw (left)</option></select></label>
@@ -582,6 +589,28 @@ map.on("mouseup",endStroke); map.on("touchend",endStroke); window.addEventListen
 $("pUndo").addEventListener("click",()=>{const s=undo.pop(); if(!s){$("pNote").textContent="Nothing to undo.";return;}
   for(let k=s.length-2;k>=0;k-=2)SURFACE.codes[s[k]]=s[k+1]; saveSurface(); redraw(true); schedulePlan(); $("pNote").textContent="Undone.";});
 
+/* ---------- elevation (Mapbox terrain, ~zoom 14) ---------- */
+const DEM=new Map(), DZ=14;
+async function ensureDEM(w,s,e,n){
+  const need=[];
+  for(let x=Math.floor(lon2x(w,DZ));x<=Math.floor(lon2x(e,DZ));x++)for(let y=Math.floor(lat2y(n,DZ));y<=Math.floor(lat2y(s,DZ));y++){const k=x+"/"+y;if(!DEM.has(k))need.push([x,y,k]);}
+  await Promise.all(need.map(async([x,y,k])=>{try{const r=await fetch(`https://api.mapbox.com/v4/mapbox.mapbox-terrain-dem-v1/${DZ}/${x}/${y}@2x.pngraw?access_token=${TOKEN}`);
+    if(!r.ok)throw 0; const bm=await createImageBitmap(await r.blob()); const c=document.createElement("canvas");c.width=bm.width;c.height=bm.height;
+    const g=c.getContext("2d");g.drawImage(bm,0,0);DEM.set(k,{d:g.getImageData(0,0,bm.width,bm.height).data,w:bm.width});}catch{DEM.set(k,null);}}));
+}
+function elevAt(lon,lat){
+  const X=lon2x(lon,DZ),Y=lat2y(lat,DZ),tx=Math.floor(X),ty=Math.floor(Y),t=DEM.get(tx+"/"+ty); if(!t)return null;
+  const fx=(X-tx)*t.w-.5,fy=(Y-ty)*t.w-.5,x0=Math.max(0,Math.min(t.w-2,Math.floor(fx))),y0=Math.max(0,Math.min(t.w-2,Math.floor(fy))),ax=Math.min(1,Math.max(0,fx-x0)),ay=Math.min(1,Math.max(0,fy-y0));
+  const h=(x,y)=>{const i=(y*t.w+x)*4;return -10000+(t.d[i]*65536+t.d[i+1]*256+t.d[i+2])*.1;};
+  return h(x0,y0)*(1-ax)*(1-ay)+h(x0+1,y0)*ax*(1-ay)+h(x0,y0+1)*(1-ax)*ay+h(x0+1,y0+1)*ax*ay;
+}
+
+/* ---------- strategies ---------- */
+let STRAT="optimise", LAST=null;
+document.querySelectorAll("#strat button").forEach(b=>b.addEventListener("click",()=>{
+  STRAT=b.dataset.s; document.querySelectorAll("#strat button").forEach(x=>x.setAttribute("aria-pressed",x===b?"true":"false"));
+  if(LAST)showPlan(LAST.H,LAST.p);}));
+
 /* ---------- AI caddie ---------- */
 const BAG_KEY="caddie-bag-v1";
 const E=window.CaddieEngine;
@@ -596,6 +625,8 @@ $("bagSave").addEventListener("click",()=>{
 const setLab=(id,f)=>{$(id).addEventListener("input",()=>{f();schedulePlan();});f();};
 setLab("off",()=>$("vOff").textContent="+"+(+$("off").value/100).toFixed(2));
 setLab("treeH",()=>$("vTree").textContent=$("treeH").value+" m");
+setLab("mis",()=>{const v=+$("mis").value;$("vMis").textContent=v===0?"never":v<100?"fewer than usual":v===100?"normal for a 12":"more than usual";});
+$("useElev").addEventListener("change",schedulePlan); $("par").addEventListener("change",schedulePlan);
 setLab("disp",()=>{const v=+$("disp").value;$("vDisp").textContent=v<90?"flushing it":v>110?"loose today":"normal";});
 $("miss").addEventListener("change",schedulePlan);
 
@@ -608,24 +639,34 @@ function runPlan(){
   const fc=draw.getAll();
   const ts=teeList(); if(!ts.length||!greenCentre()){clearPlanLayers();return;}
   $("plan").innerHTML='<p class="empty">Planning… (simulating a few thousand shots)</p>';
-  setTimeout(()=>{
+  setTimeout(async()=>{
     let H,C,p;
     try{
       H=E.buildHole({type:"FeatureCollection",features:[...fc.features,...COURSE]},hole(),$("fromTee").value||ts[0].properties.tee,{surface:SAMPLE||undefined});
-      C=E.makeCaddie(H,{bag:BAG,off:+$("off").value/100,treeH:+$("treeH").value,disp:+$("disp").value/100,missM:+$("miss").value});
+      let elev=null;
+      if($("useElev").checked){const [w,s,e,n]=turf.bbox({type:"FeatureCollection",features:[[H.bbox[0],H.bbox[1]],[H.bbox[2],H.bbox[3]]].map(xy=>turf.point(H.P.from(xy)))});
+        await ensureDEM(w,s,e,n); elev=(x,y)=>elevAt(...H.P.from([x,y]));}
+      C=E.makeCaddie(H,{bag:BAG,off:+$("off").value/100,treeH:+$("treeH").value,disp:+$("disp").value/100,missM:+$("miss").value,
+        par:+$("par").value,mishit:+$("mis").value/100,elev});
       if(fromMe){const [x,y]=H.P.to(me);if(H.lie(x,y)==="X"){$("plan").innerHTML='<p class="empty warn">You are outside the mapped hole. Stand on the hole, or plan from the tee.</p>';return;}
         p=C.planFrom(x,y);} else p=C.planTee();
     }catch(err){$("plan").innerHTML=`<p class="empty warn">${err.message}</p>`;return;}
-    showPlan(H,p);
+    LAST={H,p}; showPlan(H,p);
   },20);
 }
 function sideText(o){return o.off===0?"at the flag line":`${Math.abs(o.off)} m ${o.off>0?"right":"left"} of the flag line`;}
-function showPlan(H,p){
+function showPlan(H,pAll){
+  const p=pAll.strategies?Object.assign({},pAll,pAll.strategies[STRAT]):pAll;
   const b=p.best,pc=v=>Math.round(100*(v||0))+"%",m=b.mix||p.options[0].mix;
+  const S3=pAll.strategies||{}, NAMES={aggressive:"Aggressive",optimise:"Optimise",safe:"Safe"};
+  const cmp=Object.keys(NAMES).filter(k=>S3[k]).map(k=>{const q=S3[k];
+    return `<tr${k===STRAT?' style="font-weight:600"':''}><td>${NAMES[k]}</td><td>${q.best.club[0]}</td><td>${q.expected.toFixed(2)}</td><td>${pc(q.pBirdie)}</td><td>${pc(q.pDouble)}</td></tr>`;}).join("");
+  const climb=pAll.climb;
   const rows=p.options.map((o,i)=>`<tr${i?"":' style="font-weight:600"'}><td>${o.club[0]}</td><td>${o.v.toFixed(2)}</td><td>${pc(o.mix.F)}</td><td>${pc((o.mix.R||0)+(o.mix.S||0))}</td><td>${pc(o.mix.T)}</td><td>${pc((o.mix.O||0)+(o.mix.X||0))}</td></tr>`).join("");
   $("plan").innerHTML=`<div class="rec">${b.club[0]} · ${Math.round(b.club[1])} m</div>
-    <div class="sub">Aim ${sideText(b)}. Expected score ${p.expected.toFixed(2)}${fromMe?` from ${Math.round(p.toPin)} m`:" for the hole"}.</div>
-    <ol>${p.chain.map(s=>`<li>${s.club} ${s.carry} m → ${s.left} m left, ${s.lie}</li>`).join("")}</ol>
+    <div class="sub">Aim ${sideText(b)}. Average ${p.expected.toFixed(2)}${fromMe?` from ${Math.round(p.toPin)} m`:" for the hole"}${climb!=null&&Math.abs(climb)>=2?` · plays ${climb>0?"uphill":"downhill"} ${Math.abs(climb)} m`:""}.</div>
+    <table style="margin:6px 0 2px"><tr><th>Strategy</th><th>Tee club</th><th>Average</th><th>Birdie+</th><th>Double+</th></tr>${cmp}</table>
+    <ol>${p.chain.map(s=>`<li>${s.club} ${s.carry} m → ${s.left} m left, ${s.lie}${s.rise&&Math.abs(s.rise)>=3?` (${s.rise>0?"+":""}${s.rise} m)`:""}</li>`).join("")}</ol>
     <table style="margin-top:6px"><tr><th>Option</th><th>Score</th><th>Fairway</th><th>Rough/sand</th><th>Trees</th><th>OB</th></tr>${rows}</table>
     ${H.warnings.length?`<p class="empty warn" style="margin-top:6px">${H.warnings.join(" ")}</p>`:""}`;
   drawPlan(H,p);

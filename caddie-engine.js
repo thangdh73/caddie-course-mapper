@@ -25,7 +25,7 @@ const PUNCH = [["Punch", 70, 12], ["Chip", 25, 4]];
 const TP = 0.6, TREE_P = 0.7, CLEAR_M = 8, TEE_CLEAR_M = 20;
 const BASE = [[15, 2.42], [30, 2.58], [45, 2.68], [60, 2.76], [75, 2.84], [91, 2.92], [110, 2.98], [128, 3.05],
   [146, 3.13], [165, 3.25], [183, 3.41], [201, 3.54], [230, 3.70], [260, 3.86], [300, 4.05], [350, 4.30], [400, 4.55], [450, 4.78], [550, 5.2]];
-const PUTT = [[0.3, 1.0], [1, 1.35], [2, 1.55], [4, 1.72], [7, 1.86], [12, 2.00], [20, 2.15], [30, 2.32]];
+const PUTT = [[0.3, 1.0], [1, 1.12], [2, 1.42], [3, 1.6], [5, 1.8], [8, 1.95], [12, 2.1], [20, 2.3], [30, 2.5]];   // ~12 handicap
 const PEN = { F: 0, R: .25, S: .46, T: .72, O: 1.2, U: .35 };   // U: ground the map couldn't read
 const ROLL = { F: 9, R: 4, G: 3, S: 0, T: 2 };
 const NAME = { F: "fairway", R: "rough", S: "sand", W: "water", T: "trees", G: "green", O: "OB", X: "off the map", U: "uncertain" };
@@ -177,7 +177,13 @@ function buildHole(geojson, holeNo, teeColour, opts = {}) {
 
 /* ---------- the planner ---------- */
 function makeCaddie(hole, opts = {}) {
-  const S = Object.assign({ bag: DEFAULT_BAG, off: .25, treeH: 15, disp: 1, missM: 0, wind: 0, seed: 7 }, opts);
+  const S = Object.assign({ bag: DEFAULT_BAG, off: .25, treeH: 15, disp: 1, missM: 0, wind: 0, seed: 7, elev: null, elevK: 1.0, par: 4, mishit: 1 }, opts);
+  /* bad strikes (tops, thins, chunks) for a ~12 handicap; 'mishit' scales them (0 = never) */
+  const mishitP = c => S.mishit * (/wood|Driver/.test(c[0]) ? .10 : c[1] >= 170 ? .08 : c[1] >= 120 ? .06 : .04);
+  /* elevation: each metre of rise makes a shot play about 1 m longer (and 1 m shorter per metre of fall) */
+  const Z = S.elev ? (x, y) => { const v = S.elev(x, y); return v == null || !isFinite(v) ? null : v; } : () => null;
+  const zPin = Z(...hole.pin);
+  const rise = (x0, y0, x1, y1) => { const a = Z(x0, y0), b = Z(x1, y1); return a == null || b == null ? 0 : b - a; };
   const rnd = mulberry(S.seed);
   const gauss = () => { let u = 0, v = 0; while (!u) u = rnd(); while (!v) v = rnd(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v); };
   const hAt = (apex, t) => t <= TP ? apex * (1 - ((TP - t) / TP) ** 2) : apex * (1 - ((t - TP) / (1 - TP)) ** 2);
@@ -185,7 +191,7 @@ function makeCaddie(hole, opts = {}) {
   const [px, py] = hole.pin;
   const dPin = (x, y) => Math.hypot(x - px, y - py);
   function es(l, x, y) {
-    const d = dPin(x, y);
+    const zx = Z(x, y), d = Math.max(0, dPin(x, y) + (zPin != null && zx != null ? S.elevK * (zPin - zx) : 0));   // plays-as distance
     if (l === "G") return interp(PUTT, Math.max(d, .5)) + S.off * .4;
     const b = interp(BASE, Math.max(d, 12)) + S.off;
     return b + (PEN[l] !== undefined ? PEN[l] : .3);
@@ -205,7 +211,7 @@ function makeCaddie(hole, opts = {}) {
   /* value field on a 4 m ground grid */
   const [bx0, by0, bx1, by1] = hole.bbox, VC = 4;
   const VX = Math.ceil((bx1 - bx0) / VC), VY = Math.ceil((by1 - by0) / VC);
-  const V = new Float32Array(VX * VY);
+  const V = new Float32Array(VX * VY), POL = new Array(VX * VY);
   const vAt = (x, y) => {
     const i = Math.max(0, Math.min(VX - 1, Math.floor((x - bx0) / VC))), k = Math.max(0, Math.min(VY - 1, Math.floor((y - by0) / VC)));
     return V[k * VX + i];
@@ -213,8 +219,13 @@ function makeCaddie(hole, opts = {}) {
   function sampleShot(x, y, club, aimX, aimY, fromTee) {
     const carry = plays(club[1]), rad = club[2] * S.disp;
     const dx = aimX - x, dy = aimY - y, L = Math.hypot(dx, dy) || 1, ex = dx / L, ey = dy / L, qx = ey, qy = -ex; // q = right
-    const al = carry + gauss() * Math.max(4, carry * .042 * S.disp), lat = gauss() * rad / 2 + S.missM;
+    let al = carry + gauss() * Math.max(4, carry * .042 * S.disp); let lat = gauss() * rad / 2 + S.missM;
+    if (club[0] !== "Punch" && club[0] !== "Chip" && rnd() < mishitP(club)) { al = carry * (.55 + .3 * rnd()); lat *= 1.6; }
     let nx = x + ex * al + qx * lat, ny = y + ey * al + qy * lat;
+    if (S.elev) {                               // landing higher = the ball comes down sooner
+      const dz = rise(x, y, nx, ny); al = Math.max(10, al - S.elevK * dz);
+      nx = x + ex * al + qx * lat; ny = y + ey * al + qy * lat;
+    }
     const hit = flightHit(x, y, nx, ny, club, TREE_P, fromTee);
     if (hit) return { x: hit.x, y: hit.y, k: "hit" };
     let l = hole.lie(nx, ny);
@@ -234,6 +245,54 @@ function makeCaddie(hole, opts = {}) {
     const c = plays(club[1]);
     return [x + ex * c + ey * off, y + ey * c - ex * off];
   }
+  function evDist(x, y, club, off, N, fromTee, tgt) {
+    const [ax, ay] = aimPoint(x, y, club, off, tgt), v = new Float64Array(N);
+    for (let i = 0; i < N; i++) v[i] = 1 + outcomeValue(sampleShot(x, y, club, ax, ay, fromTee), x, y);
+    v.sort(); let m = 0; for (const a of v) m += a; m /= N;
+    const q = p => v[Math.min(N - 1, Math.floor(p * N))];
+    return { mean: m, good: q(.25), bad: q(.80) };
+  }
+  /* play a whole hole out: first shot as given, then the best shot for wherever the ball lies */
+  function putts(d) {
+    const m = interp(PUTT, Math.max(d, .5)) + S.off * .4;
+    const r = rnd();
+    if (m <= 2) return r < 2 - m ? 1 : 2;
+    return r < 3 - m ? 2 : 3;
+  }
+  function policyAt(x, y) {
+    const i = Math.max(0, Math.min(VX - 1, Math.floor((x - bx0) / VC))), k = Math.max(0, Math.min(VY - 1, Math.floor((y - by0) / VC)));
+    return POL[k * VX + i] || { c: candidates(x, y, hole.lie(x, y), false)[0], a: 0 };
+  }
+  function playOut(x, y, first, fromTee) {
+    let strokes = 0, cx = x, cy = y, shot = first, tee = fromTee;
+    for (let n = 0; n < 12; n++) {
+      if (!shot) { const lieNow = hole.lie(cx, cy);
+        if (lieNow === "G") return strokes + putts(dPin(cx, cy));
+        if (dPin(cx, cy) <= 14) { strokes++; return strokes + putts(Math.max(.6, 1.2 + .15 * dPin(cx, cy) + Math.abs(gauss()) * 1.8)); }   // chip ~3 m, then putt
+        shot = policyAt(cx, cy); }
+      const [ax, ay] = aimPoint(cx, cy, shot.c, shot.a, shot.tgt);
+      const o = sampleShot(cx, cy, shot.c, ax, ay, tee); strokes++; tee = false; shot = null;
+      if (o.k === "O" || o.k === "X") { strokes++; continue; }                 // stroke and distance: replay
+      if (o.k === "W") { strokes++; cx = o.x + (cx - o.x) * .05; cy = o.y + (cy - o.y) * .05; continue; }
+      cx = o.x; cy = o.y;
+    }
+    return strokes + 2;
+  }
+  function scorecard(x, y, club, off, tgt, fromTee, P) {
+    let sum = 0, birdie = 0, dbl = 0;
+    for (let i = 0; i < P; i++) { const s = playOut(x, y, { c: club, a: off, tgt }, fromTee); sum += s;
+      if (s <= S.par - 1) birdie++; if (s >= S.par + 2) dbl++; }
+    return { avg: sum / P, pBirdie: birdie / P, pDouble: dbl / P };
+  }
+  /* the three strategies rank the same simulated outcomes differently:
+     optimise = lowest average; safe = lowest bad-day score (80th percentile);
+     aggressive = lowest good-day score (25th percentile). A little of the average
+     breaks ties so neither extreme picks something silly. */
+  /* strategies judged on whole-hole scorecards:
+     optimise = lowest average; safe = fewest doubles or worse; aggressive = most birdies.
+     a double counts as 3 extra strokes for Safe, a birdie as 3 saved for Aggressive. */
+  const SCORE = { optimise: c => c.avg, safe: c => c.avg + 3 * c.pDouble, aggressive: c => c.avg - 3 * c.pBirdie };
+  const RANK = { optimise: d => d.mean, safe: d => d.mean, aggressive: d => d.mean };
   function ev(x, y, club, off, N, fromTee, tgt) {
     const [ax, ay] = aimPoint(x, y, club, off, tgt);
     let t = 0; for (let i = 0; i < N; i++) t += outcomeValue(sampleShot(x, y, club, ax, ay, fromTee), x, y);
@@ -257,10 +316,11 @@ function makeCaddie(hole, opts = {}) {
     for (let k = 0; k < VY; k++) for (let i = 0; i < VX; i++) {
       const x = bx0 + (i + .5) * VC, y = by0 + (k + .5) * VC, l = hole.lie(x, y);
       if (l === "G" || l === "O" || l === "X" || dPin(x, y) < 14) continue;
-      let best = Infinity;
+      let best = Infinity, bp = null;
       for (const c of candidates(x, y, l, false)) for (const a of (l === "T" ? [-24, -12, 0, 12, 24] : [-9, 0, 9])) {
-        const v = ev(x, y, c, a, 20, false); if (v < best) best = v;
+        const v = ev(x, y, c, a, 20, false); if (v < best) { best = v; bp = { c, a }; }
       }
+      if (bp) POL[k * VX + i] = bp;
       if (l === "W") best = 1 + vAt(x, y);
       NV[k * VX + i] = Math.min(best, V[k * VX + i] + .4);
     }
@@ -276,37 +336,49 @@ function makeCaddie(hole, opts = {}) {
     const l0 = fromTee ? "F" : hole.lie(x, y);
     const clubs = fromTee ? S.bag.filter(c => c[1] <= dPin(x, y) + 25) : candidates(x, y, l0, false);
     const offs = []; for (let a = -36; a <= 36; a += 3) offs.push(a);
-    // targets: the flag, plus any bend of the hole line that is still ahead of the ball
     const dNow = dPin(x, y);
     const targets = [null, ...(hole.via || []).filter(v => dPin(...v) < dNow - 20 && Math.hypot(v[0] - x, v[1] - y) > 60)];
-    const perClub = [];
-    for (const c of clubs) {
-      let bc = null;
-      for (const tg of targets) for (const a of (l0 === "T" ? [-24, -18, -12, -6, 0, 6, 12, 18, 24] : offs)) {
-        const v = ev(x, y, c, a, fromTee ? 200 : 120, fromTee, tg); if (!bc || v < bc.v) bc = { v, club: c, off: a, tgt: tg };
+    // one simulation per option; every strategy ranks the same results
+    const tried = [];
+    for (const c of clubs) for (const tg of targets) for (const a of (l0 === "T" ? [-24, -18, -12, -6, 0, 6, 12, 18, 24] : offs))
+      tried.push(Object.assign({ club: c, off: a, tgt: tg }, evDist(x, y, c, a, fromTee ? 200 : 120, fromTee, tg)));
+    // screen by average, then play the best ten out to the last putt
+    tried.sort((a, b) => a.mean - b.mean);
+    const pool = [], seen = new Set();
+    for (const o of tried) { const k = o.club[0] + "|" + (o.tgt ? "c" : "f") + "|" + Math.round(o.off / 9); if (seen.has(k)) continue; seen.add(k); pool.push(o); if (pool.length >= 10) break; }
+    for (const o of pool) Object.assign(o, scorecard(x, y, o.club, o.off, o.tgt, fromTee, fromTee ? 150 : 90));
+    const out = {};
+    for (const [name, rank] of Object.entries(SCORE)) {
+      const perClub = new Map();
+      for (const o of pool) { const k = o.club[0], s = rank(o); if (!perClub.has(k) || s < perClub.get(k).s) perClub.set(k, Object.assign({ s }, o)); }
+      const ranked = [...perClub.values()].sort((a, b) => a.s - b.s);
+      const best = ranked[0];
+      const options = ranked.slice(0, 3).map(o => Object.assign({}, o, { v: o.mean, mix: mix(x, y, o.club, o.off, 400, fromTee, o.tgt) }));
+      const [ax, ay] = aimPoint(x, y, best.club, best.off, best.tgt);
+      const cloud = []; for (let i = 0; i < 160; i++) cloud.push(sampleShot(x, y, best.club, ax, ay, fromTee));
+      const chain = [{ club: best.club[0], carry: Math.round(plays(best.club[1])), from: [x, y], aim: [ax, ay] }];
+      let cx = ax, cy = ay, cl = hole.lie(ax, ay), guard = 0;
+      while (guard++ < 5 && cl !== "G" && dPin(cx, cy) > 14 && cl !== "O" && cl !== "X") {
+        let nb = null;
+        for (const c of candidates(cx, cy, cl, false)) for (const a of (cl === "T" ? [-24, -12, 0, 12, 24] : [-6, -3, 0, 3, 6])) {
+          const d = evDist(cx, cy, c, a, 40, false), s = d.mean; if (!nb || s < nb.s) nb = { s, c, a, d };
+        }
+        // strategy matters most for go-for-it decisions: re-rank this shot's two best options on full play-outs
+        const alts = []; for (const c of candidates(cx, cy, cl, false)) for (const a of [-6, 0, 6]) alts.push({ c, a, m: evDist(cx, cy, c, a, 30, false).mean });
+        alts.sort((p, q) => p.m - q.m); const shortlist = alts.slice(0, 4);
+        let pick = null; for (const o of shortlist) { const sc = scorecard(cx, cy, o.c, o.a, null, false, 60), s = rank(sc); if (!pick || s < pick.s) pick = { s, c: o.c, a: o.a }; }
+        if (pick) { nb.c = pick.c; nb.a = pick.a; }
+        const [nx, ny] = aimPoint(cx, cy, nb.c, nb.a);
+        chain.push({ club: nb.c[0], carry: Math.round(plays(nb.c[1])), from: [cx, cy], aim: [nx, ny] });
+        if (Math.hypot(nx - cx, ny - cy) < 3) break;
+        cx = nx; cy = ny; cl = hole.lie(cx, cy);
       }
-      perClub.push(bc);
+      chain.forEach(s => { s.lie = NAME[hole.lie(...s.aim)] || "rough"; s.left = Math.round(dPin(...s.aim)); s.rise = Math.round(rise(...s.from, ...s.aim)); });
+      out[name] = { best: Object.assign({ v: best.avg }, best), options: options.map(o => Object.assign(o, { v: o.avg })), cloud, chain,
+        expected: best.avg, pBirdie: best.pBirdie, pDouble: best.pDouble, toPin: dNow };
     }
-    perClub.sort((a, b) => a.v - b.v);
-    const best = perClub[0];
-    const options = perClub.slice(0, 3).map(o => Object.assign(o, { mix: mix(x, y, o.club, o.off, 400, fromTee, o.tgt) }));
-    const [ax, ay] = aimPoint(x, y, best.club, best.off, best.tgt);
-    const cloud = []; for (let i = 0; i < 160; i++) cloud.push(sampleShot(x, y, best.club, ax, ay, fromTee));
-    // the rest of the hole, following the middle of each shot
-    const chain = [{ club: best.club[0], carry: Math.round(plays(best.club[1])), from: [x, y], aim: [ax, ay] }];
-    let cx = ax, cy = ay, cl = hole.lie(ax, ay), guard = 0;
-    while (guard++ < 5 && cl !== "G" && dPin(cx, cy) > 14 && cl !== "O" && cl !== "X") {
-      let nb = null;
-      for (const c of candidates(cx, cy, cl, false)) for (const a of (cl === "T" ? [-24, -12, 0, 12, 24] : [-6, -3, 0, 3, 6])) {
-        const v = ev(cx, cy, c, a, 60, false); if (!nb || v < nb.v) nb = { v, c, a };
-      }
-      const [nx, ny] = aimPoint(cx, cy, nb.c, nb.a);
-      chain.push({ club: nb.c[0], carry: Math.round(plays(nb.c[1])), from: [cx, cy], aim: [nx, ny] });
-      if (Math.hypot(nx - cx, ny - cy) < 3) break;
-      cx = nx; cy = ny; cl = hole.lie(cx, cy);
-    }
-    chain.forEach(s => { s.lie = NAME[hole.lie(...s.aim)] || "rough"; s.left = Math.round(dPin(...s.aim)); });
-    return { best, options, cloud, chain, expected: best.v, toPin: dPin(x, y) };
+    const o = out.optimise;                     // the default plan keeps its old shape
+    return Object.assign({}, o, { strategies: out, climb: zPin != null && Z(x, y) != null ? Math.round(zPin - Z(x, y)) : null });
   }
   return { planTee: () => planFrom(0, 0, true), planFrom: (x, y) => planFrom(x, y, false), lie: hole.lie, es };
 }
