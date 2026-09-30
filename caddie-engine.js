@@ -333,10 +333,13 @@ function makeCaddie(hole, opts = {}) {
   if (!opts || typeof opts !== "object") throw new TypeError("Invalid caddie options.");
   const S = { bag: DEFAULT_BAG, off: .25, treeH: 15, disp: 1, missM: 0, wind: 0,
     seed: 7, elev: null, elevK: 1, par: 4, mishit: 1, samples: 96, policySamples: 12,
-    maxShots: 16, styleCost: .3, ...opts };
+    maxShots: 16, styleCost: .3,
+    distSd: .07,      // distance spread as a fraction of carry (12-handicap assumption; replace with measured)
+    missPct: 0,       // sideways bias as a fraction of carry, + = right (a fade grows with distance)
+    ...opts };
   for (const [key, min, max] of [["off", 0, 10], ["treeH", 0, 100], ["disp", 0, 5],
     ["missM", -100, 100], ["wind", -50, 50], ["elevK", 0, 3], ["mishit", 0, 5],
-    ["styleCost", 0, 3]]) finite(S[key], key, min, max);
+    ["styleCost", 0, 3], ["distSd", .01, .3], ["missPct", -.3, .3]]) finite(S[key], key, min, max);
   integer(S.seed, "seed", 0, 4294967295); integer(S.par, "par", 1, 10);
   integer(S.samples, "samples", 16, 4096); integer(S.policySamples, "policySamples", 4, 256);
   integer(S.maxShots, "maxShots", 2, 64);
@@ -390,10 +393,10 @@ function makeCaddie(hole, opts = {}) {
     /* partial wedges and chips: a ~12 handicap leaves chips about 3 m away on average,
        so short shots get a scatter floor instead of shrinking in proportion to length */
     const partial = c[3] === "partial";
-    const sdAlong = partial ? Math.max(c[1] * .07, 1.5 + .05 * c[1]) : Math.max(.3, c[1] * .07);
+    const sdAlong = partial ? Math.max(c[1] * S.distSd, 1.5 + .05 * c[1]) : Math.max(.3, c[1] * S.distSd);
     const radius = partial ? Math.max(c[2], 3 + .08 * c[1]) : c[2];
     let along = Math.max(.1, plays(c[1]) + p.along * sdAlong * S.disp);
-    let side = p.side * radius * S.disp / 2 + S.missM;
+    let side = p.side * radius * S.disp / 2 + S.missM + S.missPct * c[1];
     const mishitP = Math.min(.5, S.mishit * (/driver|wood/i.test(c[0]) ? .10 : c[1] >= 170 ? .08 : c[1] >= 120 ? .06 : .04));
     if (p.mishit < mishitP) { along *= .55 + .3 * p.severity; side *= 1.6; }
     let landing = [x + ex * along + ey * side, y + ey * along - ex * side];

@@ -68,6 +68,11 @@ details summary{cursor:pointer;font-weight:600;color:var(--ink2)}
 .pal{grid-template-columns:repeat(4,1fr)}
 .paint.on{outline:2px solid var(--turf2);border-radius:10px;padding:4px}
 .seg button{flex:1}
+.slog label{font-size:14px}.slog select{max-width:130px}
+.slt{font-size:13px}.slt td,.slt th{padding:3px 2px}.slt td:first-child{white-space:nowrap}
+#slList{margin:6px 0 0;padding:0;list-style:none;font-size:14px}#slList li{display:flex;justify-content:space-between;gap:6px;padding:3px 0;border-bottom:1px solid var(--line)}
+#slList button{padding:0 6px;font-size:13px}
+.pend{background:#fff;border:1px solid var(--turf2);border-radius:8px;padding:6px 8px;margin-top:6px;font-size:14px}
 .foot{font-size:13px;color:var(--ink2);padding:8px 14px 10px;border-top:1px solid var(--line)}
 .warn{color:var(--warn)}
 .mapboxgl-ctrl-group button{width:36px;height:36px}
@@ -175,6 +180,31 @@ details summary{cursor:pointer;font-weight:600;color:var(--ink2)}
     <div class="gps" id="gps"><div><b id="gF">—</b><span>front</span></div><div><b id="gC">—</b><span>centre</span></div><div><b id="gB">—</b><span>back</span></div></div>
     <p class="empty" id="gpsNote">Tap the location button on the map to show where you are.</p>
 
+    <h2>Shot log — measure your own game</h2>
+    <div class="slog" id="slog">
+      <div class="row">
+        <label>Club <select id="slClub"></select></label>
+        <label>Lie <select id="slLie"><option value="auto">auto</option><option value="TEE">tee</option><option value="F">fairway</option><option value="R">rough</option>
+          <option value="S">bunker</option><option value="T">trees</option><option value="G">green</option><option value="U">uncertain</option></select></label>
+      </div>
+      <div class="row">
+        <label>Position <select id="slSrc"><option value="gps">GPS</option><option value="tap">tap the map</option></select></label>
+        <button id="slAim" title="Tap the map where you are aiming. Otherwise the plan's aim, or the flag, is used.">Set aim</button>
+        <span class="empty" id="slAimV">aim: plan or flag</span>
+      </div>
+      <div class="row"><button id="slHit">Hit from here</button><button id="slEnd">Ball here</button><button id="slCancel" hidden>Cancel</button></div>
+      <div class="row"><label><input type="checkbox" id="slBad" style="width:auto;display:inline"> Bad strike</label>
+        <label><input type="checkbox" id="slObs" style="width:auto;display:inline"> Hit a tree or obstacle</label></div>
+      <div class="pend" id="slPend" hidden></div>
+      <p class="hint" id="slNote">Stand at your ball, pick the club, tap Hit from here. Play the shot, walk to the ball, tap Ball here.</p>
+      <ul id="slList"></ul>
+    </div>
+    <h2>My game from my shots</h2>
+    <div id="slStats"><p class="empty">No shots logged yet.</p></div>
+    <div class="row" style="margin-top:6px"><button id="slApply">Apply to my bag</button><button id="slRestore" hidden>Restore original bag</button>
+      <button id="slCsv">Export CSV</button><button id="slClear">Clear log</button></div>
+    <p class="hint" id="slStatNote" style="font-size:12px">Shots stay on this device. Bunker, tree and green shots, bad GPS and obstacle hits are left out of the averages.</p>
+
     <h2>Tees</h2>
     <div id="tees"><p class="empty">No tees marked on this hole yet.</p></div>
 
@@ -206,6 +236,7 @@ details summary{cursor:pointer;font-weight:600;color:var(--ink2)}
 <script src="https://cdn.jsdelivr.net/npm/@turf/turf@7.1.0/turf.min.js"></script>
 <script src="caddie-engine.js"></script>
 <script src="caddie-automap.js"></script>
+<script src="caddie-shots.js"></script>
 <script>
 const TOKEN_KEY = "caddie-mapbox-token";
 const TOKEN = (()=>{try{return localStorage.getItem(TOKEN_KEY)||"";}catch{return "";}})();
@@ -624,6 +655,7 @@ document.querySelectorAll("#strat button").forEach(b=>b.addEventListener("click"
 const BAG_KEY="caddie-bag-v1";
 const E=window.CaddieEngine;
 let BAG=E.DEFAULT_BAG;
+let PLAYER={}; try{PLAYER=JSON.parse(localStorage.getItem("caddie-player-v1"))||{};}catch{}
 try{const s=JSON.parse(localStorage.getItem(BAG_KEY));if(Array.isArray(s)&&s.length)BAG=s;}catch{}
 $("bag").value=BAG.map(c=>c.join(", ")).join("\n");
 $("bagSave").addEventListener("click",()=>{
@@ -660,7 +692,7 @@ function runPlan(){
       if($("useElev").checked){const [w,s,e,n]=turf.bbox({type:"FeatureCollection",features:[[H.bbox[0],H.bbox[1]],[H.bbox[2],H.bbox[3]]].map(xy=>turf.point(H.P.from(xy)))});
         await ensureDEM(w,s,e,n); elev=(x,y)=>elevAt(...H.P.from([x,y]));}
       C=E.makeCaddie(H,{bag:BAG,off:+$("off").value/100,treeH:+$("treeH").value,disp:+$("disp").value/100,missM:+$("miss").value,
-        par:+$("par").value,mishit:+$("mis").value/100,elev,samples:192});
+        par:+$("par").value,mishit:+$("mis").value/100,elev,samples:192,distSd:PLAYER.distSd||.07,missPct:PLAYER.missPct||0});
       if(fromMe){const [x,y]=H.P.to(me);if(H.lie(x,y)==="X"){$("plan").innerHTML='<p class="empty warn">You are outside the mapped hole. Stand on the hole, or plan from the tee.</p>';return;}
         p=C.planFrom(x,y);} else p=C.planTee();
     }catch(err){$("plan").innerHTML=`<p class="empty warn">${err.message}</p>`;return;}
@@ -716,8 +748,8 @@ function drawPlan(H,p){
 }
 
 /* ---------- GPS: distances from where you stand ---------- */
-let me = null;
-geo.on("geolocate", e => { me = [e.coords.longitude, e.coords.latitude]; $("gpsNote").textContent = `GPS accuracy about ${Math.round(e.coords.accuracy)} m.`; updateGps(); });
+let me = null, meAcc = null, meTime = 0;
+geo.on("geolocate", e => { me = [e.coords.longitude, e.coords.latitude]; meAcc = e.coords.accuracy; meTime = Date.now(); $("gpsNote").textContent = `GPS accuracy about ${Math.round(e.coords.accuracy)} m.`; updateGps(); });
 function updateGps() {
   if (!me) return;
   const gc = greenCentre(), g = featuresOf("green")[0];
@@ -729,6 +761,189 @@ function updateGps() {
     $("gF").textContent = Math.round(Math.min(...al)); $("gB").textContent = Math.round(Math.max(...al));
   } else { $("gF").textContent = "—"; $("gB").textContent = "—"; }
 }
+
+/* ---------- shot log: measure your own game ---------- */
+const CS=window.CaddieShots, SHOT_KEY="caddie-shots-v1", PEND_KEY="caddie-shot-pending-v1", PLAYER_KEY="caddie-player-v1";
+const loadJ=(k,d)=>{try{const v=JSON.parse(localStorage.getItem(k));return v==null?d:v;}catch{return d;}};
+const saveJ=(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v));return true;}catch{return false;}};
+const escH=s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+let SHOTS=loadJ(SHOT_KEY,[]), PENDING=loadJ(PEND_KEY,null), awaitTap=null, aimOverride=null, ANALYSIS=null;
+const slNote=m=>{$("slNote").textContent=m;};
+const baseBag=()=>PLAYER.baseBag&&PLAYER.baseBag.length?PLAYER.baseBag:BAG;     // what the bag was before any shot-based change
+
+function fillClubs(){const sel=$("slClub"),cur=sel.value;sel.innerHTML="";
+  for(const c of BAG)sel.add(new Option(c[0],c[0])); if(BAG.some(c=>c[0]===cur))sel.value=cur;}
+fillClubs(); $("bagSave").addEventListener("click",()=>{
+  // a hand-edited bag becomes the new starting point for blending (so data is never counted twice)
+  if(PLAYER.baseBag){PLAYER.baseBag=BAG.map(c=>c.slice());saveJ(PLAYER_KEY,PLAYER);}
+  fillClubs();renderStats();});
+
+/* what is under a point: your marks first, then the auto-map, else rough */
+const LIE_ORDER=["green","bunker","water","trees","fairway"], LIE_OF={green:"G",bunker:"S",water:"W",trees:"T",fairway:"F"};
+function lieAtLL(lon,lat){
+  const pt=turf.point([lon,lat]),h=hole();
+  const fs=draw.getAll().features.filter(f=>+f.properties.hole===h&&f.geometry.type==="Polygon"&&LIE_ORDER.includes(f.properties.kind));
+  for(const k of LIE_ORDER)if(fs.some(f=>f.properties.kind===k&&turf.booleanPointInPolygon(pt,f)))return LIE_OF[k];
+  const s=SAMPLE&&SAMPLE(lon,lat); if(s&&"RFSWTGOU".includes(s))return s;
+  return "R";
+}
+function nearTee(ll){return draw.getAll().features.some(f=>f.properties.kind==="tee"&&+f.properties.hole===hole()&&
+  turf.distance(turf.point(f.geometry.coordinates),turf.point(ll),{units:"kilometers"})*1000<12);}
+
+/* positions: GPS, or a tap on the map (also handy without a good fix) */
+function tapMap(what){return new Promise(resolve=>{awaitTap={what,resolve};map.getCanvas().style.cursor="crosshair";
+  slNote({start:"Tap the map where the ball is.",end:"Tap the map where the ball finished.",aim:"Tap the map where you are aiming."}[what]);
+  $("slCancel").hidden=false;});}
+map.on("click",e=>{if(!awaitTap)return;const a=awaitTap;awaitTap=null;map.getCanvas().style.cursor="";
+  a.resolve({ll:[e.lngLat.lng,e.lngLat.lat],acc:2,via:"tap"});});
+function getPos(what){
+  if($("slSrc").value==="tap")return tapMap(what);
+  if(me&&Date.now()-meTime<20000)return Promise.resolve({ll:me.slice(),acc:meAcc||8,via:"gps"});
+  // the phone may have slept (browsers pause location updates): ask for a fresh fix instead of refusing
+  slNote("Getting a GPS fix…");
+  return new Promise((resolve,reject)=>{
+    if(!navigator.geolocation){reject(new Error("This browser has no GPS. Set Position to 'tap the map'."));return;}
+    navigator.geolocation.getCurrentPosition(pos=>{me=[pos.coords.longitude,pos.coords.latitude];meAcc=pos.coords.accuracy;meTime=Date.now();
+        resolve({ll:me.slice(),acc:meAcc||8,via:"gps"});},
+      err=>reject(new Error("Couldn't get a GPS fix ("+err.message+"). Allow location for this site, move to open sky, or set Position to 'tap the map'.")),
+      {enableHighAccuracy:true,timeout:12000,maximumAge:5000});});
+}
+function chooseAim(startLL,club){
+  if(aimOverride)return{ll:aimOverride,source:"tapped"};
+  const q=LAST&&LAST.p&&(LAST.p.strategies?LAST.p.strategies[STRAT]:LAST.p), c0=q&&q.chain&&q.chain[0];
+  if(c0&&c0.club===club&&c0.aim&&c0.from){try{const f=LAST.H.P.from(c0.from),a=LAST.H.P.from(c0.aim);
+    if(turf.distance(turf.point(f),turf.point(startLL),{units:"kilometers"})*1000<20)return{ll:a,source:"plan"};}catch{}}
+  return{ll:greenCentre(),source:"flag"};
+}
+function renderAim(){$("slAimV").textContent=aimOverride?"aim: tapped point (tap Set aim to clear)":"aim: plan or flag";}
+$("slAim").addEventListener("click",async()=>{
+  if(awaitTap)return; if(aimOverride){aimOverride=null;renderAim();return;}
+  const pos=await tapMap("aim"); aimOverride=pos.ll; renderAim(); $("slCancel").hidden=!PENDING;
+  slNote("Aim set. It is used for the next shot, until you tap Set aim again to clear it.");});
+$("slCancel").addEventListener("click",()=>{awaitTap=null;map.getCanvas().style.cursor="";
+  if(PENDING&&!awaitTap){PENDING=null;try{localStorage.removeItem(PEND_KEY);}catch{}}
+  $("slCancel").hidden=true;renderPending();slNote("Cancelled.");});
+
+function renderPending(){
+  const box=$("slPend");
+  if(!PENDING){box.hidden=true;$("slEnd").disabled=true;$("slHit").textContent="Hit from here";$("slCancel").hidden=!awaitTap;refreshShotLayers();return;}
+  box.hidden=false;$("slEnd").disabled=false;$("slHit").textContent="Replace start";$("slCancel").hidden=false;
+  box.innerHTML=`Waiting for the ball: <b>${escH(PENDING.club)}</b> from ${PENDING.lie==="TEE"?"the tee":escH(PENDING.lie)} on hole ${PENDING.hole} (aim: ${PENDING.aimSource}). Play the shot, walk to it, tap <b>Ball here</b>.`;
+  refreshShotLayers();
+}
+$("slHit").addEventListener("click",async()=>{
+  if(awaitTap)return;
+  if(!greenCentre()){slNote("Mark or load the green centre for this hole first, so the caddie knows the flag line.");return;}
+  let pos;try{pos=await getPos("start");}catch(e){slNote(e.message);return;}
+  const club=$("slClub").value;
+  let lie=$("slLie").value,lieSource="chosen";
+  if(lie==="auto"){lieSource="auto";lie=nearTee(pos.ll)?"TEE":lieAtLL(pos.ll[0],pos.ll[1]);}
+  const a=chooseAim(pos.ll,club);
+  PENDING={id:Date.now().toString(36)+Math.random().toString(36).slice(2,5),t:Date.now(),course:$("q").value,hole:hole(),tee:$("fromTee").value||null,
+    club,lie,lieSource,from:pos.ll,accFrom:+(pos.acc||0).toFixed(1),viaStart:pos.via,aim:a.ll,aimSource:a.source};
+  saveJ(PEND_KEY,PENDING);$("slCancel").hidden=false;renderPending();
+  slNote(pos.via==="gps"&&pos.acc>15?`Start recorded, but the GPS is only good to ${Math.round(pos.acc)} m. Shots with a fix worse than ${CS.constants.MAX_ACC} m are not counted.`:"Start recorded. Play the shot.");
+});
+$("slEnd").addEventListener("click",async()=>{
+  if(!PENDING||awaitTap)return;
+  let pos;try{pos=await getPos("end");}catch(e){slNote(e.message);return;}
+  const f=PENDING.from,to=pos.ll;
+  let zFrom=null,zTo=null;
+  try{await ensureDEM(Math.min(f[0],to[0])-.0005,Math.min(f[1],to[1])-.0005,Math.max(f[0],to[0])+.0005,Math.max(f[1],to[1])+.0005);
+    zFrom=elevAt(f[0],f[1]);zTo=elevAt(to[0],to[1]);}catch{}
+  const shot=Object.assign({},PENDING,{to,accTo:+(pos.acc||0).toFixed(1),viaEnd:pos.via,
+    zFrom:Number.isFinite(zFrom)?+zFrom.toFixed(1):null,zTo:Number.isFinite(zTo)?+zTo.toFixed(1):null,
+    endLie:lieAtLL(to[0],to[1]),mishit:$("slBad").checked,obstacle:$("slObs").checked});
+  SHOTS.push(shot);PENDING=null;try{localStorage.removeItem(PEND_KEY);}catch{}
+  if(!saveJ(SHOT_KEY,SHOTS))slNote("Couldn't save on this device. Use Export CSV to keep your shots.");
+  $("slBad").checked=false;$("slObs").checked=false;$("slCancel").hidden=true;
+  const m=CS.measure(shot),why=CS.usability(shot,m);
+  renderPending();renderList();renderStats();
+  if(m.valid)slNote(`Logged: ${shot.club} went ${m.along.toFixed(0)} m, ${Math.abs(m.lateral).toFixed(0)} m ${m.lateral>=0?"right":"left"} of your aim line`+
+    (why==="ok"?".":` — not counted in the averages (${{lie:"bunker, trees or green",obstacle:"hit an obstacle",gps:"poor GPS",short:"under 5 m",ignored:"ignored"}[why]||why}).`));
+});
+
+function renderList(){
+  const ul=$("slList"),rows=SHOTS.map((s,i)=>[s,i]).filter(([s])=>+s.hole===hole()).slice(-6).reverse();
+  ul.innerHTML=rows.map(([s,i])=>{const m=CS.measure(s);
+    return `<li><span>${escH(s.club)} ${m.valid?`${m.along.toFixed(0)} m, ${Math.abs(m.lateral).toFixed(0)} m ${m.lateral>=0?"R":"L"}`:"?"}${s.mishit?" · bad strike":""}${s.obstacle?" · obstacle":""}</span><button data-del="${i}" title="Delete this shot">✕</button></li>`;}).join("");
+}
+$("slList").addEventListener("click",e=>{const b=e.target.closest("button[data-del]");if(!b)return;
+  SHOTS.splice(+b.dataset.del,1);saveJ(SHOT_KEY,SHOTS);renderList();renderStats();refreshShotLayers();});
+
+/* the statistics */
+const f1=v=>Number.isFinite(v)?v.toFixed(1):"–", f0=v=>Number.isFinite(v)?Math.round(v):"–", pc1=v=>Number.isFinite(v)?(100*v).toFixed(1)+"%":"–";
+function renderStats(){
+  const base=baseBag();
+  ANALYSIS=CS.analyse(SHOTS,base,{priorDistSd:.07});
+  const a=ANALYSIS,cur=new Map(BAG.map(c=>[c[0],c]));
+  const any=a.totalUsed>0;
+  $("slApply").disabled=!any; $("slRestore").hidden=!PLAYER.baseBag; $("slCsv").disabled=!SHOTS.length; $("slClear").disabled=!SHOTS.length;
+  if(!SHOTS.length){$("slStats").innerHTML='<p class="empty">No shots logged yet.</p>';return;}
+  const rows=a.rows.filter(r=>r.logged>0).map(r=>{const c=cur.get(r.club)||[r.club,r.priorCarry,r.priorW];
+    const carry=r.carrySuggest!=null?`${f0(c[1])} → <b>${f0(r.carrySuggest)}</b>`:(r.carryEst!=null?`${f0(c[1])} <span class="empty">(meas. ${f0(r.carryEst)})</span>`:f0(c[1]));
+    const w=r.wSuggest!=null?`${f1(c[2])} → <b>${f1(Math.round(r.wSuggest*2)/2)}</b>`:(r.wMeas!=null?`${f1(c[2])} <span class="empty">(meas. ${f1(r.wMeas)})</span>`:f1(c[2]));
+    const st=r.status==="need"?`need ${r.needed} more`:r.status;
+    return `<tr><td>${escH(r.club)}<br><span class="empty">${r.n} shots · ${st}</span></td><td>${carry}</td><td>${w}</td><td>${r.bias!=null?(r.bias>=0?"+":"")+f1(r.bias)+" m":"–"}</td></tr>`;}).join("");
+  const P=a.pooled,ex=a.excluded,exTxt=[ex.lie&&`${ex.lie} from bunker/trees/green`,ex.obstacle&&`${ex.obstacle} hit an obstacle`,ex.gps&&`${ex.gps} poor GPS`,ex.short&&`${ex.short} under 5 m`,ex.ignored&&`${ex.ignored} ignored`,ex.club&&`${ex.club} unknown club`].filter(Boolean).join(", ");
+  const d=P.distSd.measured!=null?`measured ${pc1(P.distSd.measured)}${P.distSd.suggest!=null?` → <b>${pc1(P.distSd.suggest)}</b>`:` <span class="empty">(need about ${Math.max(0,P.distSd.needed-P.distSd.dof)} more shots across clubs)</span>`}`:'<span class="empty">not enough shots yet</span>';
+  const ms=P.missPct.measured!=null?`${P.missPct.measured>=0?"+":""}${pc1(P.missPct.measured)} of distance (${P.missPct.measured>=0?"right":"left"}, ±${pc1(P.missPct.se)})${P.missPct.suggest!=null?` → <b>${P.missPct.suggest>=0?"+":""}${pc1(P.missPct.suggest)}</b>`:` <span class="empty">(need ${Math.max(0,P.missPct.needed-P.missPct.n)} more)</span>`}`:'<span class="empty">not enough shots yet</span>';
+  const mh=P.mishit.logged?`${P.mishit.flagged} of ${P.mishit.logged} (${pc1(P.mishit.rate)}; the model assumes ${pc1(P.mishit.defaultRate)})${P.mishit.suggestScale!=null?` → slider <b>${Math.round(P.mishit.suggestScale*100)}%</b>`:` <span class="empty">(need ${Math.max(0,P.mishit.needed-P.mishit.logged)} more shots)</span>`}`:"–";
+  $("slStats").innerHTML=(rows?`<table class="slt"><tr><th>Club</th><th>Carry m<br><span class="empty">now → from shots</span></th><th>Sideways ± m</th><th>Miss</th></tr>${rows}</table>`:"")+
+    `<p class="empty" style="margin:6px 0 2px">Distance spread: ${d}</p><p class="empty" style="margin:0 0 2px">Sideways bias: ${ms}</p><p class="empty" style="margin:0 0 2px">Bad strikes: ${mh}</p>`+
+    (exTxt?`<p class="empty" style="margin:0 0 2px">Not counted: ${exTxt}.</p>`:"")+
+    `<p class="empty" style="margin:4px 0 0;font-size:12px">Suggestions blend your shots with your current estimate, slowly, and only after ${CS.constants.MIN_CLUB} shots per club. GPS error is subtracted from the spreads; your aiming error is part of the sideways number. "Carry" is distance to where the ball stopped minus the roll the model assumes.</p>`;
+}
+$("slApply").addEventListener("click",()=>{
+  if(!ANALYSIS)renderStats();
+  const a=ANALYSIS,P=a.pooled,base=baseBag();
+  if(!PLAYER.baseBag)PLAYER.baseBag=BAG.map(c=>c.slice());
+  const nb=CS.suggestedBag(a,base).sort((x,y)=>y[1]-x[1]);
+  const changed=nb.filter((c,i)=>{const o=base.find(b=>b[0]===c[0]);return o&&(o[1]!==c[1]||o[2]!==c[2]);}).length;
+  BAG=nb;saveJ(BAG_KEY,BAG);$("bag").value=BAG.map(c=>c.join(", ")).join("\n");
+  const notes=[`${changed} club${changed===1?"":"s"} updated`];
+  if(P.distSd.suggest!=null){PLAYER.distSd=+P.distSd.suggest.toFixed(4);notes.push(`distance spread ${pc1(PLAYER.distSd)}`);}
+  if(P.missPct.suggest!=null){PLAYER.missPct=+P.missPct.suggest.toFixed(4);$("miss").value="0";notes.push(`sideways bias ${PLAYER.missPct>=0?"+":""}${pc1(PLAYER.missPct)} of distance ("Usual miss" set to straight so it isn't counted twice)`);}
+  if(P.mishit.suggestScale!=null){const v=Math.max(0,Math.min(200,Math.round(P.mishit.suggestScale*4)*25));$("mis").value=String(v);$("mis").dispatchEvent(new Event("input",{bubbles:true}));PLAYER.mishitScale=v;notes.push(`bad strikes ${v}%`);}
+  saveJ(PLAYER_KEY,PLAYER);fillClubs();renderStats();schedulePlan();
+  slNote("Applied: "+notes.join("; ")+". Plans now use these. Restore original bag undoes it.");
+});
+$("slRestore").addEventListener("click",()=>{
+  if(!PLAYER.baseBag)return;
+  BAG=PLAYER.baseBag.map(c=>c.slice());saveJ(BAG_KEY,BAG);$("bag").value=BAG.map(c=>c.join(", ")).join("\n");
+  delete PLAYER.baseBag;delete PLAYER.distSd;delete PLAYER.missPct;
+  if(PLAYER.mishitScale!=null){$("mis").value="100";$("mis").dispatchEvent(new Event("input",{bubbles:true}));delete PLAYER.mishitScale;}
+  saveJ(PLAYER_KEY,PLAYER);fillClubs();renderStats();schedulePlan();slNote("Original bag restored.");
+});
+$("slCsv").addEventListener("click",()=>{
+  const blob=new Blob([CS.toCSV(SHOTS)],{type:"text/csv"}),a=document.createElement("a");
+  a.href=URL.createObjectURL(blob);a.download=`caddie-shots-${new Date().toISOString().slice(0,10)}.csv`;a.click();});
+$("slClear").addEventListener("click",()=>{
+  if(!SHOTS.length||!confirm(`Delete all ${SHOTS.length} logged shots from this device? Export the CSV first if you want a copy.`))return;
+  SHOTS=[];saveJ(SHOT_KEY,SHOTS);renderList();renderStats();refreshShotLayers();slNote("Shot log cleared.");});
+
+/* logged shots on the map */
+function initShotLayers(){
+  if(map.getSource("shot-lines"))return;
+  const empty={type:"FeatureCollection",features:[]};
+  map.addSource("shot-lines",{type:"geojson",data:empty});map.addSource("shot-ends",{type:"geojson",data:empty});
+  map.addLayer({id:"shot-lines",type:"line",source:"shot-lines",paint:{"line-color":"#ffffff","line-width":1.6,"line-opacity":.85,"line-dasharray":[2,2]}});
+  map.addLayer({id:"shot-ends",type:"circle",source:"shot-ends",paint:{"circle-radius":["case",["==",["get","k"],"start"],5,4],
+    "circle-color":["match",["get","k"],"bad","#e2462f","obs","#f0a020","start","#00e5ff","#ffffff"],"circle-stroke-color":"#000","circle-stroke-width":1}});
+  refreshShotLayers();
+}
+function refreshShotLayers(){
+  if(!map.getSource("shot-lines"))return;
+  const h=hole(),L=[],P=[];
+  for(const s of SHOTS){if(+s.hole!==h||!s.to)continue;
+    L.push({type:"Feature",properties:{},geometry:{type:"LineString",coordinates:[s.from,s.to]}});
+    P.push({type:"Feature",properties:{k:s.mishit?"bad":s.obstacle?"obs":"ok"},geometry:{type:"Point",coordinates:s.to}});}
+  if(PENDING&&+PENDING.hole===h)P.push({type:"Feature",properties:{k:"start"},geometry:{type:"Point",coordinates:PENDING.from}});
+  map.getSource("shot-lines").setData({type:"FeatureCollection",features:L});map.getSource("shot-ends").setData({type:"FeatureCollection",features:P});
+}
+if(map.isStyleLoaded())initShotLayers();else map.once("load",initShotLayers);
+holeSel.addEventListener("change",()=>{renderList();refreshShotLayers();});
+renderPending();renderList();renderStats();
 
 /* ---------- search ---------- */
 async function find() {
