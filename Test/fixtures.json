@@ -1,0 +1,1263 @@
+{
+ "generated": "synthetic holes; expectations written before running",
+ "settings": {
+  "seed": 7,
+  "samples": 192,
+  "unmarkedLie": "R",
+  "corridor": 0,
+  "treeH": 15
+ },
+ "fixtures": [
+  {
+   "id": "ob-right",
+   "about": "Par 4, 360 m. OB line 24 m right of the centre line, nothing else.",
+   "par": 4,
+   "expect": [
+    {
+     "check": "optimiseAim",
+     "op": "<=",
+     "value": 0,
+     "why": "Should not aim toward the only hazard (OB right)."
+    }
+   ],
+   "features": [
+    {
+     "type": "Feature",
+     "properties": {
+      "kind": "tee",
+      "hole": 1,
+      "tee": "blue"
+     },
+     "geometry": {
+      "type": "Point",
+      "coordinates": [
+       101.5883,
+       3.105
+      ]
+     }
+    },
+    {
+     "type": "Feature",
+     "properties": {
+      "kind": "greenc",
+      "hole": 1
+     },
+     "geometry": {
+      "type": "Point",
+      "coordinates": [
+       101.5883,
+       3.1082556
+      ]
+     }
+    },
+    {
+     "type": "Feature",
+     "properties": {
+      "kind": "green",
+      "hole": 1
+     },
+     "geometry": {
+      "type": "Polygon",
+      "coordinates": [
+       [
+        [
+         101.588201,
+         3.1081381
+        ],
+        [
+         101.588399,
+         3.1081381
+        ],
+        [
+         101.588399,
+         3.1083732
+        ],
+        [
+         101.588201,
+         3.1083732
+        ],
+        [
+         101.588201,
+         3.1081381
+        ]
+       ]
+      ]
+     }
+    },
+    {
+     "type": "Feature",
+     "properties": {
+      "kind": "fairway",
+      "hole": 1
+     },
+     "geometry": {
+      "type": "Polygon",
+      "coordinates": [
+       [
+        [
+         101.5881561,
+         3.1060852
+        ],
+        [
+         101.5884439,
+         3.1060852
+        ],
+        [
+         101.5884439,
+         3.1079843
+        ],
+        [
+         101.5881561,
+         3.1079843
+        ],
+        [
+         101.5881561,
+         3.1060852
+        ]
+       ]
+      ]
+     }
+    },
+    {
+     "type": "Feature",
+     "properties": {
+      "kind": "ob",
+      "hole": 1
+     },
+     "geometry": {
+      "type": "LineString",
+      "coordinates": [
+       [
+        101.5885159,
+        3.1055426
+       ],
+       [
+        101.5885159,
+        3.1085269
+       ]
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "ob-left",
+   "about": "Mirror image of ob-right.",
+   "par": 4,
+   "expect": [
+    {
+     "check": "optimiseAim",
+     "op": ">=",
+     "value": 0,
+     "why": "Should not aim toward the only hazard (OB left)."
+    }
+   ],
+   "features": [
+    {
+     "type": "Feature",
+     "properties": {
+      "kind": "tee",
+      "hole": 1,
+      "tee": "blue"
+     },
+     "geometry": {
+      "type": "Point",
+      "coordinates": [
+       101.5883,
+       3.105
+      ]
+     }
+    },
+    {
+     "type": "Feature",
+     "properties": {
+      "kind": "greenc",
+      "hole": 1
+     },
+     "geometry": {
+      "type": "Point",
+      "coordinates": [
+       101.5883,
+       3.1082556
+      ]
+     }
+    },
+    {
+     "type": "Feature",
+     "properties": {
+      "kind": "green",
+      "hole": 1
+     },
+     "geometry": {
+      "type": "Polygon",
+      "coordinates": [
+       [
+        [
+         101.588201,
+         3.1081381
+        ],
+        [
+         101.588399,
+         3.1081381
+        ],
+        [
+         101.588399,
+         3.1083732
+        ],
+        [
+         101.588201,
+         3.1083732
+        ],
+        [
+         101.588201,
+         3.1081381
+        ]
+       ]
+      ]
+     }
+    },
+    {
+     "type": "Feature",
+     "properties": {
+      "kind": "fairway",
+      "hole": 1
+     },
+     "geometry": {
+      "type": "Polygon",
+      "coordinates": [
+       [
+        [
+         101.5881561,
+         3.1060852
+        ],
+        [
+         101.5884439,
+         3.1060852
+        ],
+        [
+         101.5884439,
+         3.1079843
+        ],
+        [
+         101.5881561,
+         3.1079843
+        ],
+        [
+         101.5881561,
+         3.1060852
+        ]
+       ]
+      ]
+     }
+    },
+    {
+     "type": "Feature",
+     "properties": {
+      "kind": "ob",
+      "hole": 1
+     },
+     "geometry": {
+      "type": "LineString",
+      "coordinates": [
+       [
+        101.5880841,
+        3.1055426
+       ],
+       [
+        101.5880841,
+        3.1085269
+       ]
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "fairway-ends",
+   "about": "Par 4, 300 m. Fairway ends at 210 m; trees across 218-240 m.",
+   "par": 4,
+   "expect": [
+    {
+     "check": "optimiseCarry",
+     "op": "<=",
+     "value": 200,
+     "why": "Driver (230) and 3-wood (205) reach the tree band."
+    }
+   ],
+   "features": [
+    {
+     "type": "Feature",
+     "properties": {
+      "kind": "tee",
+      "hole": 1,
+      "tee": "blue"
+     },
+     "geometry": {
+      "type": "Point",
+      "coordinates": [
+       101.5883,
+       3.105
+      ]
+     }
+    },
+    {
+     "type": "Feature",
+     "properties": {
+      "kind": "greenc",
+      "hole": 1
+     },
+     "geometry": {
+      "type": "Point",
+      "coordinates": [
+       101.5883,
+       3.107713
+      ]
+     }
+    },
+    {
+     "type": "Feature",
+     "properties": {
+      "kind": "green",
+      "hole": 1
+     },
+     "geometry": {
+      "type": "Polygon",
+      "coordinates": [
+       [
+        [
+         101.588201,
+         3.1075955
+        ],
+        [
+         101.588399,
+         3.1075955
+        ],
+        [
+         101.588399,
+         3.1078306
+        ],
+        [
+         101.588201,
+         3.1078306
+        ],
+        [
+         101.588201,
+         3.1075955
+        ]
+       ]
+      ]
+     }
+    },
+    {
+     "type": "Feature",
+     "properties": {
+      "kind": "fairway",
+      "hole": 1
+     },
+     "geometry": {
+      "type": "Polygon",
+      "coordinates": [
+       [
+        [
+         101.5881561,
+         3.1060852
+        ],
+        [
+         101.5884439,
+         3.1060852
+        ],
+        [
+         101.5884439,
+         3.1068991
+        ],
+        [
+         101.5881561,
+         3.1068991
+        ],
+        [
+         101.5881561,
+         3.1060852
+        ]
+       ]
+      ]
+     }
+    },
+    {
+     "type": "Feature",
+     "properties": {
+      "kind": "trees",
+      "hole": 1
+     },
+     "geometry": {
+      "type": "Polygon",
+      "coordinates": [
+       [
+        [
+         101.5879401,
+         3.1069715
+        ],
+        [
+         101.5886599,
+         3.1069715
+        ],
+        [
+         101.5886599,
+         3.1071704
+        ],
+        [
+         101.5879401,
+         3.1071704
+        ],
+        [
+         101.5879401,
+         3.1069715
+        ]
+       ]
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "dogleg",
+   "about": "Dog-leg right: 235 m north then 150 m east; wood fills the inside corner; routing line given.",
+   "par": 4,
+   "expect": [
+    {
+     "check": "optimiseCorner",
+     "op": "==",
+     "value": true,
+     "why": "The flag line crosses the wood; the corner is the open route."
+    }
+   ],
+   "features": [
+    {
+     "type": "Feature",
+     "properties": {
+      "kind": "tee",
+      "hole": 1,
+      "tee": "blue"
+     },
+     "geometry": {
+      "type": "Point",
+      "coordinates": [
+       101.5883,
+       3.105
+      ]
+     }
+    },
+    {
+     "type": "Feature",
+     "properties": {
+      "kind": "greenc",
+      "hole": 1
+     },
+     "geometry": {
+      "type": "Point",
+      "coordinates": [
+       101.5896494,
+       3.1071704
+      ]
+     }
+    },
+    {
+     "type": "Feature",
+     "properties": {
+      "kind": "green",
+      "hole": 1
+     },
+     "geometry": {
+      "type": "Polygon",
+      "coordinates": [
+       [
+        [
+         101.5895415,
+         3.1070619
+        ],
+        [
+         101.5897574,
+         3.1070619
+        ],
+        [
+         101.5897574,
+         3.1072789
+        ],
+        [
+         101.5895415,
+         3.1072789
+        ],
+        [
+         101.5895415,
+         3.1070619
+        ]
+       ]
+      ]
+     }
+    },
+    {
+     "type": "Feature",
+     "properties": {
+      "kind": "fairway",
+      "hole": 1
+     },
+     "geometry": {
+      "type": "Polygon",
+      "coordinates": [
+       [
+        [
+         101.5881561,
+         3.1060852
+        ],
+        [
+         101.5884439,
+         3.1060852
+        ],
+        [
+         101.5884439,
+         3.1073061
+        ],
+        [
+         101.5881561,
+         3.1073061
+        ],
+        [
+         101.5881561,
+         3.1060852
+        ]
+       ]
+      ]
+     }
+    },
+    {
+     "type": "Feature",
+     "properties": {
+      "kind": "fairway",
+      "hole": 1
+     },
+     "geometry": {
+      "type": "Polygon",
+      "coordinates": [
+       [
+        [
+         101.5883,
+         3.1070076
+        ],
+        [
+         101.5895595,
+         3.1070076
+        ],
+        [
+         101.5895595,
+         3.1073332
+        ],
+        [
+         101.5883,
+         3.1073332
+        ],
+        [
+         101.5883,
+         3.1070076
+        ]
+       ]
+      ]
+     }
+    },
+    {
+     "type": "Feature",
+     "properties": {
+      "kind": "trees",
+      "hole": 1
+     },
+     "geometry": {
+      "type": "Polygon",
+      "coordinates": [
+       [
+        [
+         101.5885249,
+         3.1051809
+        ],
+        [
+         101.5897394,
+         3.1051809
+        ],
+        [
+         101.5897394,
+         3.1069443
+        ],
+        [
+         101.5885249,
+         3.1069443
+        ],
+        [
+         101.5885249,
+         3.1051809
+        ]
+       ]
+      ]
+     }
+    },
+    {
+     "type": "Feature",
+     "properties": {
+      "kind": "holeline",
+      "hole": 1
+     },
+     "geometry": {
+      "type": "LineString",
+      "coordinates": [
+       [
+        101.5883,
+        3.105
+       ],
+       [
+        101.5883,
+        3.1071252
+       ],
+       [
+        101.5896494,
+        3.1071704
+       ]
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "tight-ob",
+   "about": "Par 4, 370 m. OB 18 m right in the driver landing zone (190-260 m); trees left.",
+   "par": 4,
+   "expect": [
+    {
+     "check": "styleConsistent",
+     "style": "safe",
+     "why": "If Safe differs from Optimise it must cut doubles beyond noise within 0.3 strokes; otherwise it must equal Optimise."
+    },
+    {
+     "check": "styleConsistent",
+     "style": "aggressive",
+     "why": "Same rule for birdies."
+    }
+   ],
+   "features": [
+    {
+     "type": "Feature",
+     "properties": {
+      "kind": "tee",
+      "hole": 1,
+      "tee": "blue"
+     },
+     "geometry": {
+      "type": "Point",
+      "coordinates": [
+       101.5883,
+       3.105
+      ]
+     }
+    },
+    {
+     "type": "Feature",
+     "properties": {
+      "kind": "greenc",
+      "hole": 1
+     },
+     "geometry": {
+      "type": "Point",
+      "coordinates": [
+       101.5883,
+       3.1083461
+      ]
+     }
+    },
+    {
+     "type": "Feature",
+     "properties": {
+      "kind": "green",
+      "hole": 1
+     },
+     "geometry": {
+      "type": "Polygon",
+      "coordinates": [
+       [
+        [
+         101.588201,
+         3.1082285
+        ],
+        [
+         101.588399,
+         3.1082285
+        ],
+        [
+         101.588399,
+         3.1084636
+        ],
+        [
+         101.588201,
+         3.1084636
+        ],
+        [
+         101.588201,
+         3.1082285
+        ]
+       ]
+      ]
+     }
+    },
+    {
+     "type": "Feature",
+     "properties": {
+      "kind": "fairway",
+      "hole": 1
+     },
+     "geometry": {
+      "type": "Polygon",
+      "coordinates": [
+       [
+        [
+         101.5881201,
+         3.1060852
+        ],
+        [
+         101.5884799,
+         3.1060852
+        ],
+        [
+         101.5884799,
+         3.1081652
+        ],
+        [
+         101.5881201,
+         3.1081652
+        ],
+        [
+         101.5881201,
+         3.1060852
+        ]
+       ]
+      ]
+     }
+    },
+    {
+     "type": "Feature",
+     "properties": {
+      "kind": "ob",
+      "hole": 1
+     },
+     "geometry": {
+      "type": "LineString",
+      "coordinates": [
+       [
+        101.5884619,
+        3.1067183
+       ],
+       [
+        101.5884619,
+        3.1073513
+       ]
+      ]
+     }
+    },
+    {
+     "type": "Feature",
+     "properties": {
+      "kind": "ob",
+      "hole": 1
+     },
+     "geometry": {
+      "type": "LineString",
+      "coordinates": [
+       [
+        101.5886599,
+        3.1055426
+       ],
+       [
+        101.5886599,
+        3.1067183
+       ]
+      ]
+     }
+    },
+    {
+     "type": "Feature",
+     "properties": {
+      "kind": "trees",
+      "hole": 1
+     },
+     "geometry": {
+      "type": "Polygon",
+      "coordinates": [
+       [
+        [
+         101.5877602,
+         3.1055426
+        ],
+        [
+         101.5880661,
+         3.1055426
+        ],
+        [
+         101.5880661,
+         3.1082556
+        ],
+        [
+         101.5877602,
+         3.1082556
+        ],
+        [
+         101.5877602,
+         3.1055426
+        ]
+       ]
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "par5-lake",
+   "about": "Par 5, 440 m, reachable in two; lake 385-425 m fronting the green.",
+   "par": 5,
+   "expect": [
+    {
+     "check": "styleConsistent",
+     "style": "safe",
+     "why": "As above."
+    },
+    {
+     "check": "styleConsistent",
+     "style": "aggressive",
+     "why": "As above."
+    }
+   ],
+   "features": [
+    {
+     "type": "Feature",
+     "properties": {
+      "kind": "tee",
+      "hole": 1,
+      "tee": "blue"
+     },
+     "geometry": {
+      "type": "Point",
+      "coordinates": [
+       101.5883,
+       3.105
+      ]
+     }
+    },
+    {
+     "type": "Feature",
+     "properties": {
+      "kind": "greenc",
+      "hole": 1
+     },
+     "geometry": {
+      "type": "Point",
+      "coordinates": [
+       101.5883,
+       3.1089791
+      ]
+     }
+    },
+    {
+     "type": "Feature",
+     "properties": {
+      "kind": "green",
+      "hole": 1
+     },
+     "geometry": {
+      "type": "Polygon",
+      "coordinates": [
+       [
+        [
+         101.588201,
+         3.1088615
+        ],
+        [
+         101.588399,
+         3.1088615
+        ],
+        [
+         101.588399,
+         3.1090967
+        ],
+        [
+         101.588201,
+         3.1090967
+        ],
+        [
+         101.588201,
+         3.1088615
+        ]
+       ]
+      ]
+     }
+    },
+    {
+     "type": "Feature",
+     "properties": {
+      "kind": "fairway",
+      "hole": 1
+     },
+     "geometry": {
+      "type": "Polygon",
+      "coordinates": [
+       [
+        [
+         101.5881021,
+         3.1059948
+        ],
+        [
+         101.5884979,
+         3.1059948
+        ],
+        [
+         101.5884979,
+         3.1084365
+        ],
+        [
+         101.5881021,
+         3.1084365
+        ],
+        [
+         101.5881021,
+         3.1059948
+        ]
+       ]
+      ]
+     }
+    },
+    {
+     "type": "Feature",
+     "properties": {
+      "kind": "water",
+      "hole": 1
+     },
+     "geometry": {
+      "type": "Polygon",
+      "coordinates": [
+       [
+        [
+         101.5878952,
+         3.1084817
+        ],
+        [
+         101.5887048,
+         3.1084817
+        ],
+        [
+         101.5887048,
+         3.1088435
+        ],
+        [
+         101.5878952,
+         3.1088435
+        ],
+        [
+         101.5878952,
+         3.1084817
+        ]
+       ]
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "par3-water-left",
+   "about": "Par 3, 150 m. Water left of the green and short of it.",
+   "par": 3,
+   "expect": [
+    {
+     "check": "optimiseAim",
+     "op": ">=",
+     "value": -3,
+     "why": "Should not aim meaningfully toward the water side."
+    },
+    {
+     "check": "styleConsistent",
+     "style": "safe",
+     "why": "As above."
+    }
+   ],
+   "features": [
+    {
+     "type": "Feature",
+     "properties": {
+      "kind": "tee",
+      "hole": 1,
+      "tee": "blue"
+     },
+     "geometry": {
+      "type": "Point",
+      "coordinates": [
+       101.5883,
+       3.105
+      ]
+     }
+    },
+    {
+     "type": "Feature",
+     "properties": {
+      "kind": "greenc",
+      "hole": 1
+     },
+     "geometry": {
+      "type": "Point",
+      "coordinates": [
+       101.5883,
+       3.1063565
+      ]
+     }
+    },
+    {
+     "type": "Feature",
+     "properties": {
+      "kind": "green",
+      "hole": 1
+     },
+     "geometry": {
+      "type": "Polygon",
+      "coordinates": [
+       [
+        [
+         101.588201,
+         3.106248
+        ],
+        [
+         101.588399,
+         3.106248
+        ],
+        [
+         101.588399,
+         3.106465
+        ],
+        [
+         101.588201,
+         3.106465
+        ],
+        [
+         101.588201,
+         3.106248
+        ]
+       ]
+      ]
+     }
+    },
+    {
+     "type": "Feature",
+     "properties": {
+      "kind": "water",
+      "hole": 1
+     },
+     "geometry": {
+      "type": "Polygon",
+      "coordinates": [
+       [
+        [
+         101.5877602,
+         3.105633
+        ],
+        [
+         101.588192,
+         3.105633
+        ],
+        [
+         101.588192,
+         3.1065374
+        ],
+        [
+         101.5877602,
+         3.1065374
+        ],
+        [
+         101.5877602,
+         3.105633
+        ]
+       ]
+      ]
+     }
+    },
+    {
+     "type": "Feature",
+     "properties": {
+      "kind": "water",
+      "hole": 1
+     },
+     "geometry": {
+      "type": "Polygon",
+      "coordinates": [
+       [
+        [
+         101.5877602,
+         3.105633
+        ],
+        [
+         101.5884259,
+         3.105633
+        ],
+        [
+         101.5884259,
+         3.1062299
+        ],
+        [
+         101.5877602,
+         3.1062299
+        ],
+        [
+         101.5877602,
+         3.105633
+        ]
+       ]
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "par3-90m-bunker",
+   "about": "Par 3, 90 m over a bunker. Used for an external sanity bound only.",
+   "par": 3,
+   "expect": [
+    {
+     "check": "optimiseAverage",
+     "op": ">",
+     "value": 2.8,
+     "why": "External bound: PGA Tour players average 2.80 strokes from 100 yards in the fairway (Broadie); a 12-handicap model must not beat tour level. This bounds optimism; it does not establish accuracy."
+    }
+   ],
+   "features": [
+    {
+     "type": "Feature",
+     "properties": {
+      "kind": "tee",
+      "hole": 1,
+      "tee": "blue"
+     },
+     "geometry": {
+      "type": "Point",
+      "coordinates": [
+       101.5883,
+       3.105
+      ]
+     }
+    },
+    {
+     "type": "Feature",
+     "properties": {
+      "kind": "greenc",
+      "hole": 1
+     },
+     "geometry": {
+      "type": "Point",
+      "coordinates": [
+       101.5883,
+       3.1058139
+      ]
+     }
+    },
+    {
+     "type": "Feature",
+     "properties": {
+      "kind": "green",
+      "hole": 1
+     },
+     "geometry": {
+      "type": "Polygon",
+      "coordinates": [
+       [
+        [
+         101.58821,
+         3.1057235
+        ],
+        [
+         101.58839,
+         3.1057235
+        ],
+        [
+         101.58839,
+         3.1059043
+        ],
+        [
+         101.58821,
+         3.1059043
+        ],
+        [
+         101.58821,
+         3.1057235
+        ]
+       ]
+      ]
+     }
+    },
+    {
+     "type": "Feature",
+     "properties": {
+      "kind": "bunker",
+      "hole": 1
+     },
+     "geometry": {
+      "type": "Polygon",
+      "coordinates": [
+       [
+        [
+         101.58821,
+         3.1056511
+        ],
+        [
+         101.58839,
+         3.1056511
+        ],
+        [
+         101.58839,
+         3.1057235
+        ],
+        [
+         101.58821,
+         3.1057235
+        ],
+        [
+         101.58821,
+         3.1056511
+        ]
+       ]
+      ]
+     }
+    },
+    {
+     "type": "Feature",
+     "properties": {
+      "kind": "bunker",
+      "hole": 1
+     },
+     "geometry": {
+      "type": "Polygon",
+      "coordinates": [
+       [
+        [
+         101.5881021,
+         3.1057054
+        ],
+        [
+         101.58821,
+         3.1057054
+        ],
+        [
+         101.58821,
+         3.1058863
+        ],
+        [
+         101.5881021,
+         3.1058863
+        ],
+        [
+         101.5881021,
+         3.1057054
+        ]
+       ]
+      ]
+     }
+    }
+   ]
+  }
+ ]
+}

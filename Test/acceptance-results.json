@@ -1,0 +1,544 @@
+{
+ "kind": "software regression, synthetic holes",
+ "settings": {
+  "seed": 7,
+  "samples": 192,
+  "unmarkedLie": "R",
+  "corridor": 0,
+  "treeH": 15
+ },
+ "pass": 19,
+ "fail": 0,
+ "rows": [
+  {
+   "id": "ob-right",
+   "about": "Par 4, 360 m. OB line 24 m right of the centre line, nothing else.",
+   "seconds": 1.732,
+   "samples": 192,
+   "seed": 7,
+   "strategies": {
+    "optimise": {
+     "first": "Driver -12 m",
+     "average": 4.068,
+     "ci95": [
+      3.988,
+      4.147
+     ],
+     "pBirdie": 0.125,
+     "pDouble": 0,
+     "chosen": true,
+     "reason": "Lowest simulated average.",
+     "nearTie": false,
+     "versus": "Driving iron -12 m"
+    },
+    "safe": {
+     "first": "Driver -12 m",
+     "average": 4.068,
+     "ci95": [
+      3.988,
+      4.147
+     ],
+     "pBirdie": 0.125,
+     "pDouble": 0,
+     "chosen": false,
+     "reason": "No plan within 0.3 strokes cuts doubles-or-worse by more than simulation noise; Safe = Optimise.",
+     "nearTie": false,
+     "versus": "Driving iron -12 m"
+    },
+    "aggressive": {
+     "first": "Driver -12 m",
+     "average": 4.068,
+     "ci95": [
+      3.988,
+      4.147
+     ],
+     "pBirdie": 0.125,
+     "pDouble": 0,
+     "chosen": false,
+     "reason": "No plan within 0.3 strokes raises birdies-or-better by more than simulation noise; Aggressive = Optimise.",
+     "nearTie": false,
+     "versus": "Driving iron -12 m"
+    }
+   },
+   "results": [
+    {
+     "check": "deterministic",
+     "ok": true,
+     "detail": "same inputs twice give identical output"
+    },
+    {
+     "check": "optimiseAim",
+     "ok": true,
+     "detail": "aim -12 m (<= 0)",
+     "why": "Should not aim toward the only hazard (OB right)."
+    }
+   ]
+  },
+  {
+   "id": "ob-left",
+   "about": "Mirror image of ob-right.",
+   "seconds": 1.282,
+   "samples": 192,
+   "seed": 7,
+   "strategies": {
+    "optimise": {
+     "first": "Driver 12 m",
+     "average": 4.083,
+     "ci95": [
+      4,
+      4.167
+     ],
+     "pBirdie": 0.11979166666666667,
+     "pDouble": 0.005208333333333333,
+     "chosen": true,
+     "reason": "Lowest simulated average.",
+     "nearTie": false,
+     "versus": "3-wood 12 m"
+    },
+    "safe": {
+     "first": "Driver 12 m",
+     "average": 4.083,
+     "ci95": [
+      4,
+      4.167
+     ],
+     "pBirdie": 0.11979166666666667,
+     "pDouble": 0.005208333333333333,
+     "chosen": false,
+     "reason": "No plan within 0.3 strokes cuts doubles-or-worse by more than simulation noise; Safe = Optimise.",
+     "nearTie": false,
+     "versus": "3-wood 12 m"
+    },
+    "aggressive": {
+     "first": "Driver 12 m",
+     "average": 4.083,
+     "ci95": [
+      4,
+      4.167
+     ],
+     "pBirdie": 0.11979166666666667,
+     "pDouble": 0.005208333333333333,
+     "chosen": false,
+     "reason": "No plan within 0.3 strokes raises birdies-or-better by more than simulation noise; Aggressive = Optimise.",
+     "nearTie": false,
+     "versus": "3-wood 12 m"
+    }
+   },
+   "results": [
+    {
+     "check": "deterministic",
+     "ok": true,
+     "detail": "same inputs twice give identical output"
+    },
+    {
+     "check": "optimiseAim",
+     "ok": true,
+     "detail": "aim 12 m (>= 0)",
+     "why": "Should not aim toward the only hazard (OB left)."
+    }
+   ]
+  },
+  {
+   "id": "fairway-ends",
+   "about": "Par 4, 300 m. Fairway ends at 210 m; trees across 218-240 m.",
+   "seconds": 1.509,
+   "samples": 192,
+   "seed": 7,
+   "strategies": {
+    "optimise": {
+     "first": "5-iron 0 m",
+     "average": 4.146,
+     "ci95": [
+      4.063,
+      4.229
+     ],
+     "pBirdie": 0.078125,
+     "pDouble": 0.020833333333333332,
+     "chosen": true,
+     "reason": "Lowest simulated average.",
+     "nearTie": true,
+     "versus": "4-iron 0 m"
+    },
+    "safe": {
+     "first": "5-iron 0 m",
+     "average": 4.146,
+     "ci95": [
+      4.063,
+      4.229
+     ],
+     "pBirdie": 0.078125,
+     "pDouble": 0.020833333333333332,
+     "chosen": false,
+     "reason": "No plan within 0.3 strokes cuts doubles-or-worse by more than simulation noise; Safe = Optimise.",
+     "nearTie": true,
+     "versus": "4-iron 0 m"
+    },
+    "aggressive": {
+     "first": "5-iron 0 m",
+     "average": 4.146,
+     "ci95": [
+      4.063,
+      4.229
+     ],
+     "pBirdie": 0.078125,
+     "pDouble": 0.020833333333333332,
+     "chosen": false,
+     "reason": "No plan within 0.3 strokes raises birdies-or-better by more than simulation noise; Aggressive = Optimise.",
+     "nearTie": true,
+     "versus": "4-iron 0 m"
+    }
+   },
+   "results": [
+    {
+     "check": "deterministic",
+     "ok": true,
+     "detail": "same inputs twice give identical output"
+    },
+    {
+     "check": "optimiseCarry",
+     "ok": true,
+     "detail": "5-iron 160 m (<= 200)",
+     "why": "Driver (230) and 3-wood (205) reach the tree band."
+    }
+   ]
+  },
+  {
+   "id": "dogleg",
+   "about": "Dog-leg right: 235 m north then 150 m east; wood fills the inside corner; routing line given.",
+   "seconds": 2.959,
+   "samples": 192,
+   "seed": 7,
+   "strategies": {
+    "optimise": {
+     "first": "Driver corner",
+     "average": 4.214,
+     "ci95": [
+      4.134,
+      4.293
+     ],
+     "pBirdie": 0.06770833333333333,
+     "pDouble": 0.005208333333333333,
+     "chosen": true,
+     "reason": "Lowest simulated average.",
+     "nearTie": false,
+     "versus": "Driving iron to the corner"
+    },
+    "safe": {
+     "first": "Driver corner",
+     "average": 4.214,
+     "ci95": [
+      4.134,
+      4.293
+     ],
+     "pBirdie": 0.06770833333333333,
+     "pDouble": 0.005208333333333333,
+     "chosen": false,
+     "reason": "No plan within 0.3 strokes cuts doubles-or-worse by more than simulation noise; Safe = Optimise.",
+     "nearTie": false,
+     "versus": "Driving iron to the corner"
+    },
+    "aggressive": {
+     "first": "Driver corner",
+     "average": 4.214,
+     "ci95": [
+      4.134,
+      4.293
+     ],
+     "pBirdie": 0.06770833333333333,
+     "pDouble": 0.005208333333333333,
+     "chosen": false,
+     "reason": "No plan within 0.3 strokes raises birdies-or-better by more than simulation noise; Aggressive = Optimise.",
+     "nearTie": false,
+     "versus": "Driving iron to the corner"
+    }
+   },
+   "results": [
+    {
+     "check": "deterministic",
+     "ok": true,
+     "detail": "same inputs twice give identical output"
+    },
+    {
+     "check": "optimiseCorner",
+     "ok": true,
+     "detail": "plays to the corner",
+     "why": "The flag line crosses the wood; the corner is the open route."
+    }
+   ]
+  },
+  {
+   "id": "tight-ob",
+   "about": "Par 4, 370 m. OB 18 m right in the driver landing zone (190-260 m); trees left.",
+   "seconds": 2.026,
+   "samples": 192,
+   "seed": 7,
+   "strategies": {
+    "optimise": {
+     "first": "Driving iron -6 m",
+     "average": 4.302,
+     "ci95": [
+      4.227,
+      4.378
+     ],
+     "pBirdie": 0.036458333333333336,
+     "pDouble": 0,
+     "chosen": true,
+     "reason": "Lowest simulated average.",
+     "nearTie": true,
+     "versus": "3-wood -6 m"
+    },
+    "safe": {
+     "first": "Driving iron -6 m",
+     "average": 4.302,
+     "ci95": [
+      4.227,
+      4.378
+     ],
+     "pBirdie": 0.036458333333333336,
+     "pDouble": 0,
+     "chosen": false,
+     "reason": "No plan within 0.3 strokes cuts doubles-or-worse by more than simulation noise; Safe = Optimise.",
+     "nearTie": true,
+     "versus": "3-wood -6 m"
+    },
+    "aggressive": {
+     "first": "Driving iron -6 m",
+     "average": 4.302,
+     "ci95": [
+      4.227,
+      4.378
+     ],
+     "pBirdie": 0.036458333333333336,
+     "pDouble": 0,
+     "chosen": false,
+     "reason": "No plan within 0.3 strokes raises birdies-or-better by more than simulation noise; Aggressive = Optimise.",
+     "nearTie": true,
+     "versus": "3-wood -6 m"
+    }
+   },
+   "results": [
+    {
+     "check": "deterministic",
+     "ok": true,
+     "detail": "same inputs twice give identical output"
+    },
+    {
+     "check": "styleConsistent:safe",
+     "ok": true,
+     "detail": "No plan within 0.3 strokes cuts doubles-or-worse by more than simulation noise; Safe = Optimise.",
+     "why": "If Safe differs from Optimise it must cut doubles beyond noise within 0.3 strokes; otherwise it must equal Optimise."
+    },
+    {
+     "check": "styleConsistent:aggressive",
+     "ok": true,
+     "detail": "No plan within 0.3 strokes raises birdies-or-better by more than simulation noise; Aggressive = Optimise.",
+     "why": "Same rule for birdies."
+    }
+   ]
+  },
+  {
+   "id": "par5-lake",
+   "about": "Par 5, 440 m, reachable in two; lake 385-425 m fronting the green.",
+   "seconds": 1.335,
+   "samples": 192,
+   "seed": 7,
+   "strategies": {
+    "optimise": {
+     "first": "Driver -12 m",
+     "average": 4.792,
+     "ci95": [
+      4.675,
+      4.908
+     ],
+     "pBirdie": 0.4166666666666667,
+     "pDouble": 0.026041666666666668,
+     "chosen": true,
+     "reason": "Lowest simulated average.",
+     "nearTie": true,
+     "versus": "Driver 0 m"
+    },
+    "safe": {
+     "first": "Driver -12 m",
+     "average": 4.792,
+     "ci95": [
+      4.675,
+      4.908
+     ],
+     "pBirdie": 0.4166666666666667,
+     "pDouble": 0.026041666666666668,
+     "chosen": false,
+     "reason": "No plan within 0.3 strokes cuts doubles-or-worse by more than simulation noise; Safe = Optimise.",
+     "nearTie": true,
+     "versus": "Driver 0 m"
+    },
+    "aggressive": {
+     "first": "Driver -12 m",
+     "average": 4.792,
+     "ci95": [
+      4.675,
+      4.908
+     ],
+     "pBirdie": 0.4166666666666667,
+     "pDouble": 0.026041666666666668,
+     "chosen": false,
+     "reason": "No plan within 0.3 strokes raises birdies-or-better by more than simulation noise; Aggressive = Optimise.",
+     "nearTie": true,
+     "versus": "Driver 0 m"
+    }
+   },
+   "results": [
+    {
+     "check": "deterministic",
+     "ok": true,
+     "detail": "same inputs twice give identical output"
+    },
+    {
+     "check": "styleConsistent:safe",
+     "ok": true,
+     "detail": "No plan within 0.3 strokes cuts doubles-or-worse by more than simulation noise; Safe = Optimise.",
+     "why": "As above."
+    },
+    {
+     "check": "styleConsistent:aggressive",
+     "ok": true,
+     "detail": "No plan within 0.3 strokes raises birdies-or-better by more than simulation noise; Aggressive = Optimise.",
+     "why": "As above."
+    }
+   ]
+  },
+  {
+   "id": "par3-water-left",
+   "about": "Par 3, 150 m. Water left of the green and short of it.",
+   "seconds": 0.729,
+   "samples": 192,
+   "seed": 7,
+   "strategies": {
+    "optimise": {
+     "first": "5-iron 0 m",
+     "average": 3.443,
+     "ci95": [
+      3.349,
+      3.536
+     ],
+     "pBirdie": 0.036458333333333336,
+     "pDouble": 0.057291666666666664,
+     "chosen": true,
+     "reason": "Lowest simulated average.",
+     "nearTie": false,
+     "versus": "4-iron 6 m"
+    },
+    "safe": {
+     "first": "5-iron 0 m",
+     "average": 3.443,
+     "ci95": [
+      3.349,
+      3.536
+     ],
+     "pBirdie": 0.036458333333333336,
+     "pDouble": 0.057291666666666664,
+     "chosen": false,
+     "reason": "No plan within 0.3 strokes cuts doubles-or-worse by more than simulation noise; Safe = Optimise.",
+     "nearTie": false,
+     "versus": "4-iron 6 m"
+    },
+    "aggressive": {
+     "first": "5-iron 0 m",
+     "average": 3.443,
+     "ci95": [
+      3.349,
+      3.536
+     ],
+     "pBirdie": 0.036458333333333336,
+     "pDouble": 0.057291666666666664,
+     "chosen": false,
+     "reason": "No plan within 0.3 strokes raises birdies-or-better by more than simulation noise; Aggressive = Optimise.",
+     "nearTie": false,
+     "versus": "4-iron 6 m"
+    }
+   },
+   "results": [
+    {
+     "check": "deterministic",
+     "ok": true,
+     "detail": "same inputs twice give identical output"
+    },
+    {
+     "check": "optimiseAim",
+     "ok": true,
+     "detail": "aim 0 m (>= -3)",
+     "why": "Should not aim meaningfully toward the water side."
+    },
+    {
+     "check": "styleConsistent:safe",
+     "ok": true,
+     "detail": "No plan within 0.3 strokes cuts doubles-or-worse by more than simulation noise; Safe = Optimise.",
+     "why": "As above."
+    }
+   ]
+  },
+  {
+   "id": "par3-90m-bunker",
+   "about": "Par 3, 90 m over a bunker. Used for an external sanity bound only.",
+   "seconds": 0.766,
+   "samples": 192,
+   "seed": 7,
+   "strategies": {
+    "optimise": {
+     "first": "PW 0 m",
+     "average": 3.031,
+     "ci95": [
+      2.956,
+      3.106
+     ],
+     "pBirdie": 0.125,
+     "pDouble": 0,
+     "chosen": true,
+     "reason": "Lowest simulated average.",
+     "nearTie": false,
+     "versus": "52° 0 m"
+    },
+    "safe": {
+     "first": "PW 0 m",
+     "average": 3.031,
+     "ci95": [
+      2.956,
+      3.106
+     ],
+     "pBirdie": 0.125,
+     "pDouble": 0,
+     "chosen": false,
+     "reason": "No plan within 0.3 strokes cuts doubles-or-worse by more than simulation noise; Safe = Optimise.",
+     "nearTie": false,
+     "versus": "52° 0 m"
+    },
+    "aggressive": {
+     "first": "PW 0 m",
+     "average": 3.031,
+     "ci95": [
+      2.956,
+      3.106
+     ],
+     "pBirdie": 0.125,
+     "pDouble": 0,
+     "chosen": false,
+     "reason": "No plan within 0.3 strokes raises birdies-or-better by more than simulation noise; Aggressive = Optimise.",
+     "nearTie": false,
+     "versus": "52° 0 m"
+    }
+   },
+   "results": [
+    {
+     "check": "deterministic",
+     "ok": true,
+     "detail": "same inputs twice give identical output"
+    },
+    {
+     "check": "optimiseAverage",
+     "ok": true,
+     "detail": "average 3.03 (95% sampling 2.96-3.11) > 2.8",
+     "why": "External bound: PGA Tour players average 2.80 strokes from 100 yards in the fairway (Broadie); a 12-handicap model must not beat tour level. This bounds optimism; it does not establish accuracy."
+    }
+   ]
+  }
+ ]
+}
