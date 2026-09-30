@@ -1,433 +1,733 @@
-/* Caddie engine — plans a hole from marked course data (GeoJSON, lon/lat).
-   Works in real ground metres: every distance is on the ground, no image pixels.
-
-   Input features (properties.kind): tee (+ tee colour), greenc, green, fairway,
-   bunker, water, trees, ob. Unmarked ground inside the hole's area is rough.
-
-   Model, in one paragraph: each shot is simulated many times with the player's
-   dispersion (sideways spread = radius/2, distance spread ~4% of carry, optional
-   usual-miss bias). Each ball flies a straight line on the ground with an arc
-   (apex at 60% of carry); below the tree height a tree stops it. It lands, rolls,
-   and gets a lie. Every spot on the hole has a value — expected strokes to hole
-   out — worked backwards from the green. The best shot is the one whose simulated
-   balls finish with the lowest average value. */
+/* Golf decision-support simulator, not a learned AI or a rules adjudicator.
+ * Merged build: reviewed engine (deterministic, validated) + style strategies,
+ * amateur short game and penalty-area drops from the previous engine.
+ * Coordinates: GeoJSON longitude/latitude in; local ground metres in planner.
+ * Node: require("./caddie-engine"); browser: globalThis.CaddieEngine.
+ */
 (function (root) {
 "use strict";
 
-/* ---------- player & physics defaults ---------- */
-const DEFAULT_BAG = [            // name, carry m, dispersion radius m (~95% of shots)
+/* Bag rows: [name, carry m, lateral 95% half-width m]. The third number means 95% of shots finish
+   within +/- that distance sideways of the aim line (lateral sd = value / 2); it is NOT a circle radius.
+   Distance spread is separate (7% of carry, 12-handicap assumption). */
+const DEFAULT_BAG = [
   ["Driver", 230, 25], ["3-wood", 205, 22], ["Driving iron", 195, 15], ["3-iron", 180, 15],
   ["4-iron", 170, 15], ["5-iron", 160, 13], ["6-iron", 140, 12], ["7-iron", 135, 10],
-  ["8-iron", 130, 10], ["9-iron", 120, 7], ["PW", 105, 6], ["52°", 80, 5], ["56°", 62, 5], ["Chip", 25, 4]];
-const APEX = { "Driver": 27, "3-wood": 26, "Driving iron": 24, "3-iron": 24, "4-iron": 25, "5-iron": 26,
-  "6-iron": 27, "7-iron": 27, "8-iron": 27, "9-iron": 26, "PW": 25, "52°": 22, "56°": 20, "Chip": 3, "Punch": 5 };
-const PUNCH = [["Punch", 70, 12], ["Chip", 25, 4]];
-const TP = 0.6, TREE_P = 0.7, CLEAR_M = 8, TEE_CLEAR_M = 20;
-const BASE = [[15, 2.42], [30, 2.58], [45, 2.68], [60, 2.76], [75, 2.84], [91, 2.92], [110, 2.98], [128, 3.05],
-  [146, 3.13], [165, 3.25], [183, 3.41], [201, 3.54], [230, 3.70], [260, 3.86], [300, 4.05], [350, 4.30], [400, 4.55], [450, 4.78], [550, 5.2]];
-const PUTT = [[0.3, 1.0], [1, 1.12], [2, 1.42], [3, 1.6], [5, 1.8], [8, 1.95], [12, 2.1], [20, 2.3], [30, 2.5]];   // ~12 handicap
-const PEN = { F: 0, R: .25, S: .46, T: .72, O: 1.2, U: .35 };   // U: ground the map couldn't read
-const ROLL = { F: 9, R: 4, G: 3, S: 0, T: 2 };
-const NAME = { F: "fairway", R: "rough", S: "sand", W: "water", T: "trees", G: "green", O: "OB", X: "off the map", U: "uncertain" };
-
-function interp(t, d) {
-  if (d <= t[0][0]) return t[0][1];
-  for (let i = 1; i < t.length; i++) if (d <= t[i][0]) { const [a, av] = t[i - 1], [b, bv] = t[i]; return av + (bv - av) * (d - a) / (b - a); }
-  const [a, av] = t[t.length - 2], [b, bv] = t[t.length - 1]; return bv + (bv - av) * (d - b) / (b - a);
+  ["8-iron", 130, 10], ["9-iron", 120, 7], ["PW", 105, 6], ["52°", 80, 5],
+  ["56°", 62, 5], ["Chip", 25, 4]
+];
+const NAME = { F: "fairway", R: "rough", S: "sand", W: "water", T: "trees",
+  G: "green", O: "OB", X: "off the map", U: "uncertain" };
+const APEX = { Driver: 27, "3-wood": 26, "Driving iron": 24, "3-iron": 24, "4-iron": 25, "5-iron": 26,
+  "6-iron": 27, "7-iron": 27, "8-iron": 27, "9-iron": 26, PW: 25, "52°": 22, "56°": 20, Chip: 3, Punch: 5 };
+const BASE = [[0, 2.15], [15, 2.42], [30, 2.58], [60, 2.76], [91, 2.92],
+  [128, 3.05], [165, 3.25], [201, 3.54], [260, 3.86], [350, 4.30], [450, 4.78], [550, 5.2]];
+const PUTT = [[0, 1], [1, 1.12], [2, 1.42], [3, 1.6], [5, 1.8], [8, 1.95],
+  [12, 2.1], [20, 2.3], [30, 2.5]];
+const PEN = { F: 0, R: .25, S: .46, T: .72, U: .6 };
+const ROLL = { F: 9, R: 4, G: 3, S: 0, T: 2, U: 2 };
+const KIND = { tee: "tee", teebox: "tee", tee_box: "tee", greenc: "greenc",
+  green_centre: "greenc", green_center: "greenc", pin: "greenc", green: "G",
+  fairway: "F", rough: "R", bunker: "S", sand: "S", water: "W", pond: "W",
+  trees: "T", tree: "T", canopy: "T", ob: "O", out_of_bounds: "O", oob: "O",
+  holeline: "route", hole_line: "route", hole: "route", course: "course", golf_course: "course" };
+const norm = s => String(s == null ? "" : s).trim().toLowerCase().replace(/[\s-]+/g, "_");
+const kindOf = (p = {}) => KIND[norm(p.kind || p.type || p.feature || p.category || p.layer)];
+const teeOf = (p = {}) => norm(p.tee || p.teeColor || p.tee_colour || p.colour || p.color) || null;
+const distance = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]);
+const legal = l => !["W", "O", "X"].includes(l);
+function finite(v, name, min = -Infinity, max = Infinity) {
+  if (typeof v !== "number" || !Number.isFinite(v) || v < min || v > max)
+    throw new TypeError(`${name} must be a finite number in [${min}, ${max}].`);
+  return v;
 }
-function mulberry(seed) { return function () { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed);
-  t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
-
-/* ---------- reading the marked hole ---------- */
-const KIND = { tee: "tee", teebox: "tee", tee_box: "tee", greenc: "greenc", green_centre: "greenc", green_center: "greenc",
-  pin: "greenc", green: "green", fairway: "fairway", bunker: "bunker", sand: "bunker", water: "water", pond: "water",
-  trees: "trees", tree: "trees", canopy: "trees", ob: "ob", out_of_bounds: "ob", oob: "ob",
-  holeline: "holeline", hole_line: "holeline", hole: "holeline", course: "course", golf_course: "course" };
-function kindOf(p) {
-  const k = String(p.kind || p.type || p.feature || p.category || p.layer || "").toLowerCase().replace(/[\s-]+/g, "_");
-  return KIND[k] || null;
+function integer(v, name, min, max) {
+  finite(v, name, min, max);
+  if (!Number.isInteger(v)) throw new TypeError(`${name} must be an integer.`);
+  return v;
 }
-function teeOf(p) { return String(p.tee || p.teeColor || p.tee_colour || p.colour || p.color || "").toLowerCase() || null; }
-
-/* Local flat projection around the tee: fine to well under 0.1% over a golf hole. */
-function projector(lon0, lat0) {
-  const kx = 111320 * Math.cos(lat0 * Math.PI / 180), ky = 110574;
-  return { to: ([lon, lat]) => [(lon - lon0) * kx, (lat - lat0) * ky],
-           from: ([x, y]) => [lon0 + x / kx, lat0 + y / ky] };
+function point(p, geographic = false) {
+  if (!Array.isArray(p) || p.length < 2) throw new TypeError("Invalid coordinate pair.");
+  finite(p[0], "coordinate x", geographic ? -180 : -Infinity, geographic ? 180 : Infinity);
+  finite(p[1], "coordinate y", geographic ? -89 : -Infinity, geographic ? 89 : Infinity);
+  return p;
 }
-function inPoly(x, y, rings) {             // even-odd over all rings (holes supported)
-  let c = false;
-  for (const r of rings) for (let i = 0, j = r.length - 1; i < r.length; j = i++) {
-    const [xi, yi] = r[i], [xj, yj] = r[j];
-    if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) c = !c;
+function interp(table, d) {
+  if (d <= table[0][0]) return table[0][1];
+  for (let i = 1; i < table.length; i++) {
+    if (d <= table[i][0]) {
+      const [a, av] = table[i - 1], [b, bv] = table[i];
+      return av + (bv - av) * (d - a) / (b - a);
+    }
   }
-  return c;
+  const [a, av] = table[table.length - 2], [b, bv] = table[table.length - 1];
+  return bv + (bv - av) * (d - b) / (b - a);
+}
+function projector(lon0, lat0) {
+  point([lon0, lat0], true);
+  const r = lat0 * Math.PI / 180;
+  const kx = 111412.84 * Math.cos(r) - 93.5 * Math.cos(3 * r) + .118 * Math.cos(5 * r);
+  const ky = 111132.92 - 559.82 * Math.cos(2 * r) + 1.175 * Math.cos(4 * r) - .0023 * Math.cos(6 * r);
+  return {
+    to(p) { point(p, true); return [(p[0] - lon0) * kx, (p[1] - lat0) * ky]; },
+    from(p) { point(p); return [lon0 + p[0] / kx, lat0 + p[1] / ky]; }
+  };
+}
+function onSegment(x, y, a, b) {
+  const dx = b[0] - a[0], dy = b[1] - a[1];
+  return Math.abs(dx * (y - a[1]) - dy * (x - a[0])) < 1e-7 &&
+    x >= Math.min(a[0], b[0]) - 1e-7 && x <= Math.max(a[0], b[0]) + 1e-7 &&
+    y >= Math.min(a[1], b[1]) - 1e-7 && y <= Math.max(a[1], b[1]) + 1e-7;
+}
+function inRing(x, y, r) {
+  let inside = false;
+  for (let i = 0, j = r.length - 1; i < r.length; j = i++) {
+    const a = r[i], b = r[j];
+    if (onSegment(x, y, a, b)) return true;
+    if ((a[1] > y) !== (b[1] > y) && x < (b[0] - a[0]) * (y - a[1]) / (b[1] - a[1]) + a[0])
+      inside = !inside;
+  }
+  return inside;
+}
+function inPoly(x, y, rings) {
+  const b = rings.bounds;
+  if (b && (x < b[0] || y < b[1] || x > b[2] || y > b[3])) return false;
+  if (!inRing(x, y, rings[0])) return false;
+  for (let i = 1; i < rings.length; i++) if (inRing(x, y, rings[i])) return false;
+  return true;
+}
+function polygons(g) {
+  if (g.type === "Polygon") return [g.coordinates];
+  if (g.type === "MultiPolygon") return g.coordinates;
+  return [];
+}
+function validateGeometry(g) {
+  if (!["Point", "LineString", "Polygon", "MultiPolygon"].includes(g.type))
+    throw new TypeError(`Unsupported marked geometry: ${g.type}.`);
+  if (g.type === "Point") { point(g.coordinates, true); return; }
+  const lines = g.type === "LineString" ? [g.coordinates] : polygons(g).flat();
+  if (!lines.length) throw new TypeError("Empty marked geometry.");
+  for (const line of lines) {
+    if (!Array.isArray(line) || line.length < (g.type === "LineString" ? 2 : 4))
+      throw new TypeError("Incomplete line or polygon ring.");
+    line.forEach(p => point(p, true));
+    if (g.type !== "LineString" && distance(line[0], line[line.length - 1]) > 1e-12)
+      throw new TypeError("GeoJSON polygon rings must be closed.");
+  }
+}
+function ringArea(r) {
+  return Math.abs(r.reduce((s, p, i) => {
+    const q = r[(i + 1) % r.length]; return s + p[0] * q[1] - q[0] * p[1];
+  }, 0) / 2);
+}
+function interior(rings) {
+  const ring = rings[0], xs = ring.map(p => p[0]), ys = ring.map(p => p[1]);
+  let twiceArea = 0, sx = 0, sy = 0;
+  for (let i = 1; i < ring.length; i++) {
+    const a = ring[i - 1], b = ring[i], c = a[0] * b[1] - b[0] * a[1];
+    twiceArea += c; sx += (a[0] + b[0]) * c; sy += (a[1] + b[1]) * c;
+  }
+  const centre = twiceArea ? [sx / (3 * twiceArea), sy / (3 * twiceArea)] : ring[0];
+  if (inPoly(...centre, rings)) return centre;
+  const loX = Math.min(...xs), loY = Math.min(...ys), w = Math.max(...xs) - loX, h = Math.max(...ys) - loY;
+  let best = null;
+  for (let j = 0; j < 48; j++) for (let i = 0; i < 48; i++) {
+    const p = [loX + (i + .5) * w / 48, loY + (j + .5) * h / 48];
+    if (inPoly(...p, rings) && (!best || distance(p, centre) < distance(best, centre))) best = p;
+  }
+  if (!best) throw new TypeError("Cannot locate polygon interior; mark an explicit centre.");
+  return best;
+}
+function segmentDistance(p, a, b) {
+  const dx = b[0] - a[0], dy = b[1] - a[1], len2 = dx * dx + dy * dy;
+  const t = len2 ? Math.max(0, Math.min(1, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / len2)) : 0;
+  return distance(p, [a[0] + t * dx, a[1] + t * dy]);
 }
 
-/* Build the hole: a 2 m surface raster in ground metres. */
 function buildHole(geojson, holeNo, teeColour, opts = {}) {
-  const CORRIDOR = opts.corridor === undefined ? 32 : opts.corridor;   // m; 0 switches the tree default off
-  const fs = (geojson.features || []).filter(f => f && f.geometry && (holeNo == null || +f.properties.hole === +holeNo || f.properties.hole == null));
-  const byKind = k => fs.filter(f => kindOf(f.properties) === k);
+  if (!geojson || !Array.isArray(geojson.features)) throw new TypeError("Expected a GeoJSON FeatureCollection.");
+  if (!opts || typeof opts !== "object") throw new TypeError("Invalid hole options.");
+  const corridor = finite(opts.corridor ?? 0, "corridor", 0, 1000);
+  const maxCells = integer(opts.maxCells ?? 1000000, "maxCells", 100, 4000000);
+  const unmarked = opts.unmarkedLie ?? "U";
+  if (!["U", "R"].includes(unmarked)) throw new TypeError("unmarkedLie must be U or R.");
+  if (opts.surface != null && typeof opts.surface !== "function") throw new TypeError("surface must be a function.");
+  if (opts.courseBoundaryIsOB != null && typeof opts.courseBoundaryIsOB !== "boolean")
+    throw new TypeError("courseBoundaryIsOB must be boolean.");
+  const fs = geojson.features.filter(f => f && f.geometry &&
+    (holeNo == null || (f.properties || {}).hole == null || String(f.properties.hole) === String(holeNo)));
+  const byKind = k => fs.filter(f => kindOf(f.properties || {}) === k);
+  fs.filter(f => kindOf(f.properties || {})).forEach(f => validateGeometry(f.geometry));
   const tees = byKind("tee");
   if (!tees.length) throw new Error("Mark at least one tee.");
-  const tee = tees.find(t => teeOf(t.properties) === teeColour) || tees[0];
-  const P = projector(...tee.geometry.coordinates);
-  let pin = byKind("greenc")[0];
-  const greens = byKind("green");
-  let pinXY;
-  if (pin) pinXY = P.to(pin.geometry.coordinates);
-  else if (greens.length) { const r = greens[0].geometry.coordinates[0].map(P.to); pinXY = [r.reduce((s, p) => s + p[0], 0) / r.length, r.reduce((s, p) => s + p[1], 0) / r.length]; }
-  else throw new Error("Mark the green centre or the green edge.");
-  const polys = k => byKind(k).filter(f => f.geometry.type === "Polygon" || f.geometry.type === "MultiPolygon")
-    .flatMap(f => f.geometry.type === "Polygon" ? [f.geometry.coordinates.map(r => r.map(P.to))]
-      : f.geometry.coordinates.map(pg => pg.map(r => r.map(P.to))));
-  const G = polys("green"), F = polys("fairway"), S = polys("bunker"), W = polys("water"), T = polys("trees");
-  const OBL = byKind("ob").filter(f => f.geometry.type === "LineString").map(f => f.geometry.coordinates.map(P.to));
-  // bends of the hole's routing line: extra targets so dog-legs can be played to the corner
-  const routes = byKind("holeline").filter(f => f.geometry.type === "LineString").map(f => f.geometry.coordinates.map(P.to));
+  const colour = norm(teeColour);
+  const tee = tees.find(f => teeOf(f.properties || {}) === colour) || tees[0];
+  let origin;
+  if (tee.geometry.type === "Point") origin = tee.geometry.coordinates;
+  else {
+    const gs = polygons(tee.geometry).sort((a, b) => ringArea(b[0]) - ringArea(a[0]));
+    if (!gs.length) throw new TypeError("Tee must be a Point, Polygon or MultiPolygon.");
+    const provisional = projector(...gs[0][0][0]);
+    origin = provisional.from(interior(gs[0].map(r => r.map(p => provisional.to(p)))));
+  }
+  const P = projector(...origin);
+  const polys = k => byKind(k).flatMap(f => polygons(f.geometry)).map(pg => {
+    const projected = pg.map(r => r.map(p => P.to(p))), ps = projected[0];
+    projected.bounds = [Math.min(...ps.map(p => p[0])), Math.min(...ps.map(p => p[1])),
+      Math.max(...ps.map(p => p[0])), Math.max(...ps.map(p => p[1]))];
+    return projected;
+  });
+  const surfaces = Object.fromEntries(["F", "R", "S", "W", "T", "G", "O"].map(k => [k, polys(k)]));
+  const centres = byKind("greenc"), warnings = [];
+  let pin;
+  if (centres.length) {
+    if (centres[0].geometry.type !== "Point") throw new TypeError("Green centre must be a Point.");
+    pin = P.to(centres[0].geometry.coordinates);
+  } else if (surfaces.G.length) {
+    const largest = surfaces.G.slice().sort((a, b) => ringArea(b[0]) - ringArea(a[0]))[0];
+    pin = interior(largest);
+    warnings.push("No pin marked: an interior point of the largest green is used, not the actual cup.");
+  } else throw new Error("Mark a green centre or green polygon.");
+  const routes = byKind("route").filter(f => f.geometry.type === "LineString")
+    .map(f => f.geometry.coordinates.map(p => P.to(p)));
   const via = routes.flatMap(r => r.slice(1, -1));
-  const COURSE = polys("course");
-
-  // area of the hole: everything marked, plus a margin; beyond it is unknown ground
-  const all = [[0, 0], pinXY, ...[G, F, S, W, T].flat(3), ...OBL.flat(), ...routes.flat()];
+  const obLines = byKind("O").filter(f => f.geometry.type === "LineString")
+    .map(f => f.geometry.coordinates.map(p => P.to(p)));
+  const course = polys("course"), courseOB = opts.courseBoundaryIsOB === true && course.length > 0;
+  if (obLines.length) warnings.push("OB line side is inferred from the tee/pin midpoint; prefer explicit OB polygons.");
+  if (course.length && !courseOB) warnings.push("Course outline is not a rules boundary and is ignored for OB.");
+  if (courseOB) warnings.push("Outside the course polygon is OB by explicit option; verify the boundary.");
+  if (corridor && routes.length) warnings.push("Unmarked ground outside the requested route corridor is assumed trees; verify this assumption.");
+  if (colour && teeOf(tee.properties || {}) !== colour) warnings.push("Requested tee colour not found; first tee used.");
+  if (!surfaces.G.length) warnings.push("No green edge: a synthetic 12 m green disc is used; mark the real green.");
+  warnings.push(unmarked === "U" ? "Unmarked ground is uncertain, not verified rough." : "Unmarked ground is assumed rough by explicit option.");
+  if (!surfaces.T.length) warnings.push("Unmarked trees are not detected.");
+  if (!surfaces.O.length && !obLines.length && !courseOB) warnings.push("No explicit OB boundary is available.");
+  if (opts.surface) warnings.push("Surface callback classifications are unverified; explicit markings take precedence.");
+  const all = [[0, 0], pin, ...Object.values(surfaces).flat(3), ...routes.flat(), ...obLines.flat()];
   const xs = all.map(p => p[0]), ys = all.map(p => p[1]);
-  const M = 45, C = 2;
-  const x0 = Math.min(...xs) - M, y0 = Math.min(...ys) - M, x1 = Math.max(...xs) + M, y1 = Math.max(...ys) + M;
-  const NX = Math.ceil((x1 - x0) / C), NY = Math.ceil((y1 - y0) / C);
-  const grid = new Uint8Array(NX * NY);   // 0 R, 1 F, 2 S, 3 W, 4 T, 5 G, 6 O(OB)
-  const CODE = ["R", "F", "S", "W", "T", "G", "O", "U"];
-  const SURF = { R: 0, F: 1, S: 2, W: 3, T: 4, G: 5, O: 6, U: 7 };
-  const midTG = [pinXY[0] / 2, pinXY[1] / 2];
-  // OB: for each OB line, the side away from the tee-green midpoint is out of bounds
+  const C = 2, x0 = Math.min(...xs) - 45, y0 = Math.min(...ys) - 45;
+  const nx = Math.ceil((Math.max(...xs) + 45 - x0) / C), ny = Math.ceil((Math.max(...ys) + 45 - y0) / C);
+  if (nx * ny > maxCells) throw new RangeError("Hole extent exceeds maxCells; split the course into individual holes.");
+  const bbox = [x0, y0, x0 + nx * C, y0 + ny * C];
+  const mid = [pin[0] / 2, pin[1] / 2];
   function obSide(x, y) {
-    for (const L of OBL) {
+    return obLines.some(line => {
       let best = null;
-      for (let i = 0; i < L.length - 1; i++) {
-        const [ax, ay] = L[i], [bx, by] = L[i + 1], dx = bx - ax, dy = by - ay, l2 = dx * dx + dy * dy || 1;
-        const t = ((x - ax) * dx + (y - ay) * dy) / l2;
-        if (t < -0.02 || t > 1.02) continue;
-        const px = ax + t * dx, py = ay + t * dy, d = Math.hypot(x - px, y - py);
-        if (!best || d < best.d) best = { d, s: Math.sign(dx * (y - ay) - dy * (x - ax)), ref: Math.sign(dx * (midTG[1] - ay) - dy * (midTG[0] - ax)) };
+      for (let i = 1; i < line.length; i++) {
+        const a = line[i - 1], b = line[i], dx = b[0] - a[0], dy = b[1] - a[1], len2 = dx * dx + dy * dy;
+        if (!len2) continue;
+        const t = ((x - a[0]) * dx + (y - a[1]) * dy) / len2;
+        if (t < 0 || t > 1) continue;
+        const d = segmentDistance([x, y], a, b), side = dx * (y - a[1]) - dy * (x - a[0]);
+        const ref = dx * (mid[1] - a[1]) - dy * (mid[0] - a[0]);
+        if (!best || d < best.d) best = { d, side, ref };
       }
-      if (best && best.s !== 0 && best.s !== best.ref) return true;
-    }
-    return false;
-  }
-  for (let k = 0; k < NY; k++) for (let i = 0; i < NX; i++) {
-    const x = x0 + (i + .5) * C, y = y0 + (k + .5) * C;
-    let c = 0;
-    if (F.some(p => inPoly(x, y, p))) c = 1;
-    if (T.some(p => inPoly(x, y, p))) c = 4;
-    if (W.some(p => inPoly(x, y, p))) c = 3;
-    if (S.some(p => inPoly(x, y, p))) c = 2;
-    if (G.some(p => inPoly(x, y, p))) c = 5;
-    if (OBL.length && obSide(x, y)) c = 6;
-    grid[k * NX + i] = c;
-  }
-  if (!G.length) {                          // no green edge: a 12 m disc around the pin
-    for (let k = 0; k < NY; k++) for (let i = 0; i < NX; i++) {
-      const x = x0 + (i + .5) * C, y = y0 + (k + .5) * C;
-      if (Math.hypot(x - pinXY[0], y - pinXY[1]) < 12) grid[k * NX + i] = 5;
-    }
-  }
-  /* defaults for ground nobody has marked */
-  const segDist = (x, y, L) => { let b = Infinity;
-    for (let i = 0; i < L.length - 1; i++) { const [ax, ay] = L[i], [bx, by] = L[i + 1], dx = bx - ax, dy = by - ay, l2 = dx * dx + dy * dy || 1;
-      const t = Math.max(0, Math.min(1, ((x - ax) * dx + (y - ay) * dy) / l2)); b = Math.min(b, Math.hypot(x - ax - t * dx, y - ay - t * dy)); }
-    return b; };
-  const inCourse = (x, y) => COURSE.some(p => inPoly(x, y, p));
-  let useCourse = false;
-  if (COURSE.length && routes.length) {          // only trust the outline if this hole lies inside it
-    const L = routes[0]; let n = 0, k = 0;
-    for (let i = 0; i < L.length - 1; i++) for (let s = 0; s <= 1; s += .05) { n++; if (inCourse(L[i][0] + (L[i + 1][0] - L[i][0]) * s, L[i][1] + (L[i + 1][1] - L[i][1]) * s)) k++; }
-    useCourse = k / n >= .95;
-  }
-  /* marked ground wins; unmarked ground comes from the auto-map when there is one */
-  const marked = new Uint8Array(NX * NY);
-  for (let i = 0; i < NX * NY; i++) marked[i] = grid[i] !== 0 ? 1 : 0;
-  let fromSurface = 0;
-  if (opts.surface) for (let k = 0; k < NY; k++) for (let i = 0; i < NX; i++) {
-    if (marked[k * NX + i]) continue;
-    const s = opts.surface(...P.from([x0 + (i + .5) * C, y0 + (k + .5) * C]));
-    if (s && SURF[s] !== undefined) { grid[k * NX + i] = SURF[s]; marked[k * NX + i] = 2; fromSurface++; }
-  }
-  let assumedTrees = 0, assumedOB = 0;
-  if (useCourse || (routes.length && CORRIDOR > 0)) {
-    for (let k = 0; k < NY; k++) for (let i = 0; i < NX; i++) {
-      if (marked[k * NX + i]) continue;             // marked or auto-mapped ground always wins
-      const x = x0 + (i + .5) * C, y = y0 + (k + .5) * C;
-      if (useCourse && !inCourse(x, y)) { grid[k * NX + i] = 6; assumedOB++; continue; }
-      if (routes.length && CORRIDOR > 0 && Math.min(...routes.map(L => segDist(x, y, L))) > CORRIDOR) { grid[k * NX + i] = 4; assumedTrees++; }
-    }
-  }
-  const lie = (x, y) => {
-    const i = Math.floor((x - x0) / C), k = Math.floor((y - y0) / C);
-    if (i < 0 || i >= NX || k < 0 || k >= NY) return "X";
-    return CODE[grid[k * NX + i]];
-  };
-  const counts = {}; for (const v of grid) counts[CODE[v]] = (counts[CODE[v]] || 0) + 1;
-  return { P, pin: pinXY, via, tee: tee.properties, teeColour: teeOf(tee.properties), lie, bbox: [x0, y0, x1, y1],
-    counts, fromSurfaceM2: fromSurface * C * C, defaults: { corridorM: routes.length ? CORRIDOR : 0, assumedTreesM2: assumedTrees * C * C, courseOutlineUsed: useCourse, assumedOBM2: assumedOB * C * C },
-    warnings: [T.length || fromSurface ? null : (routes.length && CORRIDOR > 0 ? `No trees marked: ground more than ${CORRIDOR} m from the line of play is assumed to be trees.` : "No trees marked: the caddie can't see any trees."),
-      useCourse ? "Outside the course boundary is treated as OB." : (COURSE.length ? "The course outline doesn't cover this hole, so it isn't used for OB." : null),
-      OBL.length || useCourse || fromSurface ? null : "No OB line marked.", F.length || fromSurface ? null : "No fairway marked: everything counts as rough.",
-      fromSurface ? "Unmarked ground comes from the auto-map (imagery): check it on the map." : null].filter(Boolean) };
-}
-
-/* ---------- the planner ---------- */
-function makeCaddie(hole, opts = {}) {
-  const S = Object.assign({ bag: DEFAULT_BAG, off: .25, treeH: 15, disp: 1, missM: 0, wind: 0, seed: 7, elev: null, elevK: 1.0, par: 4, mishit: 1 }, opts);
-  /* bad strikes (tops, thins, chunks) for a ~12 handicap; 'mishit' scales them (0 = never) */
-  const mishitP = c => S.mishit * (/wood|Driver/.test(c[0]) ? .10 : c[1] >= 170 ? .08 : c[1] >= 120 ? .06 : .04);
-  /* elevation: each metre of rise makes a shot play about 1 m longer (and 1 m shorter per metre of fall) */
-  const Z = S.elev ? (x, y) => { const v = S.elev(x, y); return v == null || !isFinite(v) ? null : v; } : () => null;
-  const zPin = Z(...hole.pin);
-  const rise = (x0, y0, x1, y1) => { const a = Z(x0, y0), b = Z(x1, y1); return a == null || b == null ? 0 : b - a; };
-  const rnd = mulberry(S.seed);
-  const gauss = () => { let u = 0, v = 0; while (!u) u = rnd(); while (!v) v = rnd(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v); };
-  const hAt = (apex, t) => t <= TP ? apex * (1 - ((TP - t) / TP) ** 2) : apex * (1 - ((t - TP) / (1 - TP)) ** 2);
-  const plays = c => c + S.wind * .7 * (c / 150);
-  const [px, py] = hole.pin;
-  const dPin = (x, y) => Math.hypot(x - px, y - py);
-  function es(l, x, y) {
-    const zx = Z(x, y), d = Math.max(0, dPin(x, y) + (zPin != null && zx != null ? S.elevK * (zPin - zx) : 0));   // plays-as distance
-    if (l === "G") return interp(PUTT, Math.max(d, .5)) + S.off * .4;
-    const b = interp(BASE, Math.max(d, 12)) + S.off;
-    return b + (PEN[l] !== undefined ? PEN[l] : .3);
-  }
-  /* flight: straight line on the ground; below tree height a tree stops the ball */
-  function flightHit(x0, y0, x1, y1, club, prob, fromTee) {
-    const apex = APEX[club[0]] || 25, len = Math.hypot(x1 - x0, y1 - y0);
-    if (len < 8) return null;
-    const clear = fromTee ? TEE_CLEAR_M : CLEAR_M, n = Math.max(6, Math.round(len / 4));
-    for (let i = 1; i < n; i++) {
-      const t = i / n; if (hAt(apex, t) >= S.treeH || t * len < clear) continue;
-      const x = x0 + (x1 - x0) * t, y = y0 + (y1 - y0) * t;
-      if (hole.lie(x, y) === "T" && rnd() < prob) return { x, y, dist: t * len };
-    }
-    return null;
-  }
-  /* value field on a 4 m ground grid */
-  const [bx0, by0, bx1, by1] = hole.bbox, VC = 4;
-  const VX = Math.ceil((bx1 - bx0) / VC), VY = Math.ceil((by1 - by0) / VC);
-  const V = new Float32Array(VX * VY), POL = new Array(VX * VY);
-  const vAt = (x, y) => {
-    const i = Math.max(0, Math.min(VX - 1, Math.floor((x - bx0) / VC))), k = Math.max(0, Math.min(VY - 1, Math.floor((y - by0) / VC)));
-    return V[k * VX + i];
-  };
-  function sampleShot(x, y, club, aimX, aimY, fromTee) {
-    const carry = plays(club[1]), rad = club[2] * S.disp;
-    const dx = aimX - x, dy = aimY - y, L = Math.hypot(dx, dy) || 1, ex = dx / L, ey = dy / L, qx = ey, qy = -ex; // q = right
-    // distance control for a ~12 handicap: about 7% of carry (tour players ~4%), scaled by 'how you're striking it'
-    let al = carry + gauss() * Math.max(4, carry * .07 * S.disp); let lat = gauss() * rad / 2 + S.missM;
-    if (club[0] !== "Punch" && club[0] !== "Chip" && rnd() < mishitP(club)) { al = carry * (.55 + .3 * rnd()); lat *= 1.6; }
-    let nx = x + ex * al + qx * lat, ny = y + ey * al + qy * lat;
-    if (S.elev) {                               // landing higher = the ball comes down sooner
-      const dz = rise(x, y, nx, ny); al = Math.max(10, al - S.elevK * dz);
-      nx = x + ex * al + qx * lat; ny = y + ey * al + qy * lat;
-    }
-    const hit = flightHit(x, y, nx, ny, club, TREE_P, fromTee);
-    if (hit) return { x: hit.x, y: hit.y, k: "hit" };
-    let l = hole.lie(nx, ny);
-    if (l !== "W" && l !== "O" && l !== "X") { const r = (ROLL[l] || 3) * (.6 + rnd() * .8); nx += ex * r; ny += ey * r; l = hole.lie(nx, ny); }
-    return { x: nx, y: ny, k: l };
-  }
-  function outcomeValue(o, x, y) {           // x,y = where the shot was played from
-    if (o.k === "hit") return Math.max(vAt(o.x, o.y), es("T", o.x, o.y));
-    if (o.k === "O") return 1 + vAt(x, y);                        // stroke and distance
-    if (o.k === "X") return es("O", o.x, o.y) + .5;                // unknown ground: pessimistic
-    if (o.k === "W") { const bx = o.x + (x - o.x) * .05, by = o.y + (y - o.y) * .05; return 1 + Math.max(vAt(bx, by), es("R", bx, by)); }
-    return vAt(o.x, o.y);
-  }
-  function aimPoint(x, y, club, off, tgt) {  // off = metres right (+) / left (-) of the line to the target
-    const [tx, ty] = tgt || [px, py];
-    const dx = tx - x, dy = ty - y, L = Math.hypot(dx, dy) || 1, ex = dx / L, ey = dy / L;
-    const c = plays(club[1]);
-    return [x + ex * c + ey * off, y + ey * c - ex * off];
-  }
-  function evDist(x, y, club, off, N, fromTee, tgt) {
-    const [ax, ay] = aimPoint(x, y, club, off, tgt), v = new Float64Array(N); let trouble = 0;
-    for (let i = 0; i < N; i++) { const o = sampleShot(x, y, club, ax, ay, fromTee); v[i] = 1 + outcomeValue(o, x, y);
-      if (o.k === "hit" || o.k === "T" || o.k === "S" || o.k === "W" || o.k === "O" || o.k === "X") trouble++; }
-    v.sort(); let m = 0; for (const a of v) m += a; m /= N;
-    const q = p => v[Math.min(N - 1, Math.floor(p * N))];
-    return { mean: m, good: q(.25), bad: q(.80), trouble: trouble / N };
-  }
-  /* play a whole hole out: first shot as given, then the best shot for wherever the ball lies */
-  function putts(d) {
-    const m = interp(PUTT, Math.max(d, .5)) + S.off * .4;
-    const r = rnd();
-    if (m <= 2) return r < 2 - m ? 1 : 2;
-    return r < 3 - m ? 2 : 3;
-  }
-  function policyAt(x, y) {
-    const i = Math.max(0, Math.min(VX - 1, Math.floor((x - bx0) / VC))), k = Math.max(0, Math.min(VY - 1, Math.floor((y - by0) / VC)));
-    return POL[k * VX + i] || { c: candidates(x, y, hole.lie(x, y), false)[0], a: 0 };
-  }
-  function playOut(x, y, first, fromTee) {
-    let strokes = 0, cx = x, cy = y, shot = first, tee = fromTee;
-    for (let n = 0; n < 12; n++) {
-      if (!shot) { const lieNow = hole.lie(cx, cy);
-        if (lieNow === "G") return strokes + putts(dPin(cx, cy));
-        if (dPin(cx, cy) <= 14) { strokes++; return strokes + putts(Math.max(.6, 1.2 + .15 * dPin(cx, cy) + Math.abs(gauss()) * 1.8)); }   // chip ~3 m, then putt
-        shot = policyAt(cx, cy); }
-      const [ax, ay] = aimPoint(cx, cy, shot.c, shot.a, shot.tgt);
-      const o = sampleShot(cx, cy, shot.c, ax, ay, tee); strokes++; tee = false; shot = null;
-      if (o.k === "O" || o.k === "X") { strokes++; continue; }                 // stroke and distance: replay
-      if (o.k === "W") { strokes++; cx = o.x + (cx - o.x) * .05; cy = o.y + (cy - o.y) * .05; continue; }
-      cx = o.x; cy = o.y;
-    }
-    return strokes + 2;
-  }
-  function scorecard(x, y, club, off, tgt, fromTee, P) {
-    let sum = 0, birdie = 0, bogey = 0, dbl = 0;
-    for (let i = 0; i < P; i++) { const s = playOut(x, y, { c: club, a: off, tgt }, fromTee); sum += s;
-      if (s <= S.par - 1) birdie++; if (s >= S.par + 1) bogey++; if (s >= S.par + 2) dbl++; }
-    return { avg: sum / P, pBirdie: birdie / P, pBogey: bogey / P, pDouble: dbl / P };
-  }
-  /* the three strategies rank the same simulated outcomes differently:
-     optimise = lowest average; safe = lowest bad-day score (80th percentile);
-     aggressive = lowest good-day score (25th percentile). A little of the average
-     breaks ties so neither extreme picks something silly. */
-  /* strategies judged on whole-hole scorecards:
-     optimise = lowest average; safe = fewest doubles or worse; aggressive = most birdies.
-     Safe: each chance of bogey-or-worse costs 2 extra, of double-or-worse 4 more. Aggressive: a birdie is worth 4. */
-  /* strategies by style, each allowed to cost at most STYLE_COST strokes over the best average:
-     aggressive = the boldest play (longest club, then nearest the flag line, then most birdies);
-     safe = fewest doubles-or-worse for the hole plus half this shot's trouble rate (trees, sand, water, OB);
-     optimise = the lowest average. */
-  const STYLE_COST = .3;
-  const PICK = {
-    optimise: list => list.slice().sort((a, b) => a.avg - b.avg)[0],
-    aggressive: list => { const b = Math.min(...list.map(o => o.avg)); return list.filter(o => o.avg <= b + STYLE_COST)
-      .sort((a, c) => c.club[1] - a.club[1] || Math.abs(a.off) - Math.abs(c.off) || c.pBirdie - a.pBirdie)[0]; },
-    safe: list => { const b = Math.min(...list.map(o => o.avg)); return list.filter(o => o.avg <= b + STYLE_COST)
-      .sort((a, c) => (a.pDouble + .5 * a.trouble) - (c.pDouble + .5 * c.trouble) || a.avg - c.avg)[0]; }
-  };
-  const SCORE = { optimise: c => c.avg, safe: c => c.avg, aggressive: c => c.avg };
-  const RANK = { optimise: d => d.mean, safe: d => d.mean, aggressive: d => d.mean };
-  function ev(x, y, club, off, N, fromTee, tgt) {
-    const [ax, ay] = aimPoint(x, y, club, off, tgt);
-    let t = 0; for (let i = 0; i < N; i++) t += outcomeValue(sampleShot(x, y, club, ax, ay, fromTee), x, y);
-    return 1 + t / N;
-  }
-  function candidates(x, y, l, fromTee) {
-    if (l === "T") return PUNCH;
-    const d = dPin(x, y);
-    const bag = S.bag.filter(c => fromTee || c[0] !== "Driver");
-    const c = bag.filter(q => q[1] <= d + 18).sort((a, b) => Math.abs(a[1] - d) - Math.abs(b[1] - d)).slice(0, 4);
-    if (d > 190) for (const q of bag.slice(0, 2)) if (!c.includes(q)) c.push(q);
-    // lay-ups: the clubs that leave roughly 70, 100 and 130 m to the flag
-    if (d > 150) for (const leave of [70, 100, 130]) {
-      const want = d - leave, q = bag.filter(b => b[1] <= want + 10 && b[0] !== "Chip").sort((a, b) => Math.abs(a[1] - want) - Math.abs(b[1] - want))[0];
-      if (q && !c.includes(q)) c.push(q);
-    }
-    return c.length ? c : [bag[bag.length - 1]];
-  }
-  // seed, then sweep backwards-in-effect (value iteration)
-  for (let k = 0; k < VY; k++) for (let i = 0; i < VX; i++) {
-    const x = bx0 + (i + .5) * VC, y = by0 + (k + .5) * VC, l = hole.lie(x, y);
-    V[k * VX + i] = l === "O" || l === "X" ? 9 : es(l, x, y);
-  }
-  for (let sw = 0; sw < 3; sw++) {
-    const NV = V.slice();
-    for (let k = 0; k < VY; k++) for (let i = 0; i < VX; i++) {
-      const x = bx0 + (i + .5) * VC, y = by0 + (k + .5) * VC, l = hole.lie(x, y);
-      if (l === "G" || l === "O" || l === "X" || dPin(x, y) < 14) continue;
-      let best = Infinity, bp = null;
-      for (const c of candidates(x, y, l, false)) for (const a of (l === "T" ? [-24, -12, 0, 12, 24] : [-9, 0, 9])) {
-        const v = ev(x, y, c, a, 20, false); if (v < best) { best = v; bp = { c, a }; }
-      }
-      if (bp) POL[k * VX + i] = bp;
-      if (l === "W") best = 1 + vAt(x, y);
-      NV[k * VX + i] = Math.min(best, V[k * VX + i] + .4);
-    }
-    V.set(NV);
-  }
-
-  function mix(x, y, club, off, N, fromTee, tgt) {
-    const [ax, ay] = aimPoint(x, y, club, off, tgt), m = {};
-    for (let i = 0; i < N; i++) { const o = sampleShot(x, y, club, ax, ay, fromTee); const k = o.k === "hit" ? "T" : o.k; m[k] = (m[k] || 0) + 1 / N; }
-    return m;
-  }
-  function planFrom(x, y, fromTee) {
-    const l0 = fromTee ? "F" : hole.lie(x, y);
-    const clubs = fromTee ? S.bag.filter(c => c[1] <= dPin(x, y) + 25) : candidates(x, y, l0, false);
-    const offs = []; for (let a = -36; a <= 36; a += 3) offs.push(a);
-    const dNow = dPin(x, y);
-    const targets = [null, ...(hole.via || []).filter(v => dPin(...v) < dNow - 20 && Math.hypot(v[0] - x, v[1] - y) > 60)];
-    // one simulation per option; every strategy ranks the same results
-    const tried = [];
-    for (const c of clubs) for (const tg of targets) for (const a of (l0 === "T" ? [-24, -18, -12, -6, 0, 6, 12, 18, 24] : offs))
-      tried.push(Object.assign({ club: c, off: a, tgt: tg }, evDist(x, y, c, a, fromTee ? 200 : 120, fromTee, tg)));
-    // screen by average, then play the best ten out to the last putt
-    tried.sort((a, b) => a.mean - b.mean);
-    const pool = [], seen = new Set();
-    const add = o => { const k = o.club[0] + "|" + (o.tgt ? "c" : "f") + "|" + o.off; if (!seen.has(k)) { seen.add(k); pool.push(o); } };
-    tried.slice(0, 10).forEach(add);                                        // best averages overall
-    const byClub = new Map(); for (const o of tried) { if (!byClub.has(o.club[0])) byClub.set(o.club[0], []); byClub.get(o.club[0]).push(o); }
-    for (const list of byClub.values()) {                                   // every club gets a fair hearing
-      add(list[0]);                                                         // its best average
-      const floor = list[0].mean + .5;                                      // and its least-trouble aim, if not silly
-      const calm = list.filter(o => o.mean <= floor).sort((a, b) => a.trouble - b.trouble || a.mean - b.mean)[0];
-      if (calm) add(calm);
-    }
-    for (const o of pool) Object.assign(o, scorecard(x, y, o.club, o.off, o.tgt, fromTee, fromTee ? 200 : 100));
-    const out = {};
-    for (const [name, rank] of Object.entries(SCORE)) {
-      const best = PICK[name](pool);
-      const perClub = new Map();                // the comparison table: each club's best by average
-      for (const o of pool) { const k = o.club[0]; if (!perClub.has(k) || o.avg < perClub.get(k).avg) perClub.set(k, o); }
-      perClub.set(best.club[0], best);
-      const ranked = [best, ...[...perClub.values()].filter(o => o !== best).sort((a, b) => a.avg - b.avg)];
-      const options = ranked.slice(0, 3).map(o => Object.assign({}, o, { v: o.mean, mix: mix(x, y, o.club, o.off, 400, fromTee, o.tgt) }));
-      const [ax, ay] = aimPoint(x, y, best.club, best.off, best.tgt);
-      const cloud = []; for (let i = 0; i < 160; i++) cloud.push(sampleShot(x, y, best.club, ax, ay, fromTee));
-      const chain = [{ club: best.club[0], carry: Math.round(plays(best.club[1])), from: [x, y], aim: [ax, ay] }];
-      let cx = ax, cy = ay, cl = hole.lie(ax, ay), guard = 0;
-      while (guard++ < 5 && cl !== "G" && dPin(cx, cy) > 14 && cl !== "O" && cl !== "X") {
-        let nb = null;
-        for (const c of candidates(cx, cy, cl, false)) for (const a of (cl === "T" ? [-24, -12, 0, 12, 24] : [-6, -3, 0, 3, 6])) {
-          const d = evDist(cx, cy, c, a, 40, false), s = d.mean; if (!nb || s < nb.s) nb = { s, c, a, d };
-        }
-        // strategy matters most for go-for-it decisions: re-rank this shot's two best options on full play-outs
-        const alts = []; for (const c of candidates(cx, cy, cl, false)) for (const a of [-6, 0, 6]) alts.push({ c, a, m: evDist(cx, cy, c, a, 30, false).mean });
-        alts.sort((p, q) => p.m - q.m);
-        // keep the best few AND the best of each club, so a lay-up is always weighed against going for it
-        const shortlist = alts.slice(0, 5), have = new Set(shortlist.map(o => o.c[0]));
-        for (const o of alts) if (!have.has(o.c[0])) { have.add(o.c[0]); shortlist.push(o); }
-        const scored = shortlist.map(o => Object.assign({ club: o.c, off: o.a, trouble: evDist(cx, cy, o.c, o.a, 60, false).trouble }, scorecard(cx, cy, o.c, o.a, null, false, 100)));
-        const pick = PICK[name](scored);
-        if (pick) { nb.c = pick.club; nb.a = pick.off; }
-        const [nx, ny] = aimPoint(cx, cy, nb.c, nb.a);
-        chain.push({ club: nb.c[0], carry: Math.round(plays(nb.c[1])), from: [cx, cy], aim: [nx, ny] });
-        if (Math.hypot(nx - cx, ny - cy) < 3) break;
-        cx = nx; cy = ny; cl = hole.lie(cx, cy);
-      }
-      chain.forEach(s => { s.lie = NAME[hole.lie(...s.aim)] || "rough"; s.left = Math.round(dPin(...s.aim)); s.rise = Math.round(rise(...s.from, ...s.aim)); });
-      out[name] = { best: Object.assign({ v: best.avg }, best), options: options.map(o => Object.assign(o, { v: o.avg })), cloud, chain,
-        expected: best.avg, pBirdie: best.pBirdie, pBogey: best.pBogey, pDouble: best.pDouble, toPin: dNow };
-    }
-    const same = (a, b) => a.best.club[0] === b.best.club[0] && Math.abs(a.best.off - b.best.off) <= 3 && !!a.best.tgt === !!b.best.tgt;
-    const agree = same(out.safe, out.optimise) && same(out.aggressive, out.optimise);
-    const o = out.optimise;                     // the default plan keeps its old shape
-    return Object.assign({}, o, { strategies: out, agree, climb: zPin != null && Z(x, y) != null ? Math.round(zPin - Z(x, y)) : null });
-  }
-  /* per-club look at the tee shot: best aim by average, then full play-outs */
-  function teeByClub(P = 300) {
-    const offs = []; for (let a = -36; a <= 36; a += 3) offs.push(a);
-    const targets = [null, ...(hole.via || []).filter(v => dPin(...v) < dPin(0, 0) - 20 && Math.hypot(...v) > 60)];
-    return S.bag.filter(c => c[1] <= dPin(0, 0) + 25).map(c => {
-      let best = null;
-      for (const tg of targets) for (const a of offs) { const d = evDist(0, 0, c, a, 120, true, tg); if (!best || d.mean < best.mean) best = Object.assign({ off: a, tgt: tg }, d); }
-      const sc = scorecard(0, 0, c, best.off, best.tgt, true, P);
-      return { club: c[0], off: best.off, corner: !!best.tgt, avg: sc.avg, pBirdie: sc.pBirdie, pDouble: sc.pDouble };
+      return best && Math.abs(best.ref) > 1e-7 && best.side * best.ref < 0;
     });
   }
-  return { teeByClub, planTee: () => planFrom(0, 0, true), planFrom: (x, y) => planFrom(x, y, false), lie: hole.lie, es };
+  function markedLie(x, y) {
+    if (surfaces.O.some(pg => inPoly(x, y, pg)) || obSide(x, y)) return "O";
+    if (surfaces.W.some(pg => inPoly(x, y, pg))) return "W";
+    if (surfaces.T.some(pg => inPoly(x, y, pg))) return "T";
+    if (surfaces.S.some(pg => inPoly(x, y, pg))) return "S";
+    if (surfaces.G.some(pg => inPoly(x, y, pg)) || (!surfaces.G.length && distance([x, y], pin) < 12)) return "G";
+    if (surfaces.F.some(pg => inPoly(x, y, pg))) return "F";
+    if (surfaces.R.some(pg => inPoly(x, y, pg))) return "R";
+    return null;
+  }
+  const codes = ["U", "R", "F", "S", "W", "T", "G", "O"], grid = new Uint8Array(nx * ny);
+  const provenance = new Uint8Array(nx * ny), counts = {};
+  let fromSurface = 0, assumedTrees = 0, assumedOB = 0;
+  for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) {
+    const x = x0 + (i + .5) * C, y = y0 + (j + .5) * C, index = j * nx + i;
+    let l = markedLie(x, y);
+    if (l) provenance[index] = 1;
+    if (!l && opts.surface) {
+      const value = opts.surface(...P.from([x, y]));
+      if (value != null && value !== "") {
+        if (!codes.includes(value)) throw new TypeError(`Invalid surface code: ${value}.`);
+        l = value; provenance[index] = 2; fromSurface++;
+      }
+    }
+    if (!l && courseOB && !course.some(pg => inPoly(x, y, pg))) { l = "O"; assumedOB++; }
+    if (!l && corridor && routes.length && routes.every(line =>
+      line.slice(1).every((b, n) => segmentDistance([x, y], line[n], b) > corridor))) {
+      l = "T"; assumedTrees++;
+    }
+    l = l || unmarked; grid[index] = codes.indexOf(l); counts[l] = (counts[l] || 0) + 1;
+  }
+  function indexAt(x, y) {
+    const i = Math.floor((x - x0) / C), j = Math.floor((y - y0) / C);
+    return i < 0 || i >= nx || j < 0 || j >= ny ? -1 : j * nx + i;
+  }
+  function lie(x, y) {
+    point([x, y]);
+    const n = indexAt(x, y);
+    if (n < 0) return "X";
+    // Exact marked geometry keeps sub-cell hazards visible.
+    const exact = markedLie(x, y);
+    if (exact) return exact;
+    return provenance[n] === 1 ? unmarked : codes[grid[n]];
+  }
+  function provenanceAt(x, y) {
+    point([x, y]);
+    const n = indexAt(x, y);
+    if (n < 0) return "outside";
+    if (markedLie(x, y)) return "marked";
+    return provenance[n] === 2 ? "surface" : "assumed";
+  }
+  // Polygon boundary intersections prevent even narrow marked hazards being skipped by roll.
+  const edges = ["O", "W", "S", "T"].flatMap(k => surfaces[k]).flatMap(pg => pg.flatMap(r =>
+    r.slice(1).map((b, i) => [r[i], b])));
+  function pathStops(a, b) {
+    const dx = b[0] - a[0], dy = b[1] - a[1], ts = [0, 1];
+    const len = distance(a, b);
+    for (let i = 1, n = Math.ceil(len / .5); i < n; i++) ts.push(i / n);
+    for (const [p, q] of edges) {
+      const ex = q[0] - p[0], ey = q[1] - p[1], det = dx * ey - dy * ex;
+      if (Math.abs(det) < 1e-10) continue;
+      const t = ((p[0] - a[0]) * ey - (p[1] - a[1]) * ex) / det;
+      const u = ((p[0] - a[0]) * dy - (p[1] - a[1]) * dx) / det;
+      if (t >= 0 && t <= 1 && u >= 0 && u <= 1) ts.push(t, Math.min(1, t + 1e-7));
+    }
+    ts.sort((c, d) => c - d);
+    for (const t of ts) {
+      const p = [a[0] + t * dx, a[1] + t * dy], k = lie(...p);
+      if (!legal(k) || k === "S" || k === "T") return { x: p[0], y: p[1], k };
+    }
+    return { x: b[0], y: b[1], k: lie(...b) };
+  }
+  return { P, pin, via, tee: { ...(tee.properties || {}) }, teeColour: teeOf(tee.properties || {}),
+    lie, provenanceAt, pathStops, bbox, counts, fromSurfaceM2: fromSurface * C * C,
+    defaults: { corridorM: routes.length ? corridor : 0, assumedTreesM2: assumedTrees * C * C,
+      courseOutlineUsed: courseOB, assumedOBM2: assumedOB * C * C, unmarkedLie: unmarked },
+    warnings, hasTrees: surfaces.T.length > 0 || (counts.T || 0) > 0 };
+}
+
+function hash(text) {
+  let h = 2166136261;
+  for (let i = 0; i < text.length; i++) h = Math.imul(h ^ text.charCodeAt(i), 16777619);
+  return h >>> 0;
+}
+function mulberry(seed) {
+  return function () {
+    seed = seed + 0x6D2B79F5 | 0;
+    let t = Math.imul(seed ^ seed >>> 15, 1 | seed);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+function packet(rnd) {
+  const radius = Math.sqrt(-2 * Math.log(Math.max(1e-12, rnd()))), angle = 2 * Math.PI * rnd();
+  return { along: radius * Math.cos(angle), side: radius * Math.sin(angle),
+    mishit: rnd(), severity: rnd(), roll: rnd(), tree: rnd(), putt: rnd() };
+}
+const clone = value => JSON.parse(JSON.stringify(value));
+const actionKey = o => JSON.stringify([o.club, o.off, o.tgt]);
+
+function makeCaddie(hole, opts = {}) {
+  if (!hole || typeof hole.lie !== "function") throw new TypeError("Expected a built hole.");
+  point(hole.pin); point(hole.bbox && hole.bbox.slice(0, 2)); point(hole.bbox.slice(2, 4));
+  if (hole.bbox[2] <= hole.bbox[0] || hole.bbox[3] <= hole.bbox[1]) throw new TypeError("Invalid hole bounding box.");
+  if (!opts || typeof opts !== "object") throw new TypeError("Invalid caddie options.");
+  const S = { bag: DEFAULT_BAG, off: .25, treeH: 15, disp: 1, missM: 0, wind: 0,
+    seed: 7, elev: null, elevK: 1, par: 4, mishit: 1, samples: 96, policySamples: 12,
+    maxShots: 16, styleCost: .3, ...opts };
+  for (const [key, min, max] of [["off", 0, 10], ["treeH", 0, 100], ["disp", 0, 5],
+    ["missM", -100, 100], ["wind", -50, 50], ["elevK", 0, 3], ["mishit", 0, 5],
+    ["styleCost", 0, 3]]) finite(S[key], key, min, max);
+  integer(S.seed, "seed", 0, 4294967295); integer(S.par, "par", 1, 10);
+  integer(S.samples, "samples", 16, 4096); integer(S.policySamples, "policySamples", 4, 256);
+  integer(S.maxShots, "maxShots", 2, 64);
+  if (S.elev != null && typeof S.elev !== "function") throw new TypeError("elev must be a function.");
+  if (!Array.isArray(S.bag) || !S.bag.length) throw new TypeError("bag must not be empty.");
+  const names = new Set();
+  S.bag = S.bag.map(c => {
+    if (!Array.isArray(c) || typeof c[0] !== "string" || !c[0].trim() || names.has(c[0]))
+      throw new TypeError("Club names must be nonempty and unique.");
+    names.add(c[0]); finite(c[1], "club carry", .5, 400); finite(c[2], "club dispersion", 0, 200);
+    return c.slice(0, 3);
+  });
+  const warnings = [...(hole.warnings || []),
+    "Heuristic simulation, not learned AI; scores and probabilities are not field-calibrated.",
+    "Water: simplified relief, not Rule 17: one stroke, ball placed 2 m onto the first dry ground back along the line of flight. OB and off-map: stroke and distance.",
+    "Straight-flight and flat roll approximations omit spin, bounce, slope roll and wind direction. Elevation affects carry and tree clearance only.",
+    "Future shots use a sampled one-step heuristic, not a converged optimal value field; Aggressive and Safe also play their later shots in style.",
+    "Monte Carlo intervals describe sampling noise only, not model or map error; candidate selection can make them optimistic."];
+  const pin = hole.pin.slice(), dPin = (x, y) => distance([x, y], pin);
+  const Z = (x, y) => {
+    if (!S.elev) return null;
+    const z = S.elev(x, y);
+    if (z == null) return null;
+    return finite(z, "elevation");
+  };
+  const zPin = Z(...pin);
+  const rise = (a, b) => {
+    const za = Z(...a), zb = Z(...b); return za == null || zb == null ? 0 : zb - za;
+  };
+  const plays = carry => Math.max(.3, carry + S.wind * .7 * carry / 150);
+  function es(l, x, y) {
+    point([x, y]);
+    if (!NAME[l]) throw new TypeError("Unknown lie code.");
+    const z = Z(x, y), d = Math.max(0, dPin(x, y) + (z == null || zPin == null ? 0 : S.elevK * (zPin - z)));
+    if (l === "G") return interp(PUTT, d) + S.off * .4;
+    if (!legal(l)) return 1 + interp(BASE, d) + S.off + PEN.U;
+    return interp(BASE, d) + S.off + (PEN[l] ?? .6);
+  }
+  function samples(key, n) {
+    const rnd = mulberry(hash(`${S.seed}|${key}`));
+    return Array.from({ length: n }, () => packet(rnd));
+  }
+  function aimPoint(x, y, o) {
+    const target = o.tgt || pin, dx = target[0] - x, dy = target[1] - y;
+    const len = Math.hypot(dx, dy), ex = len ? dx / len : 1, ey = len ? dy / len : 0;
+    return [x + ex * plays(o.club[1]) + ey * o.off, y + ey * plays(o.club[1]) - ex * o.off];
+  }
+  function sampleShot(x, y, o, fromTee, p) {
+    const aim = aimPoint(x, y, o), dx = aim[0] - x, dy = aim[1] - y, len = Math.hypot(dx, dy) || 1;
+    const ex = dx / len, ey = dy / len, c = o.club;
+    /* partial wedges and chips: a ~12 handicap leaves chips about 3 m away on average,
+       so short shots get a scatter floor instead of shrinking in proportion to length */
+    const partial = c[3] === "partial";
+    const sdAlong = partial ? Math.max(c[1] * .07, 1.5 + .05 * c[1]) : Math.max(.3, c[1] * .07);
+    const radius = partial ? Math.max(c[2], 3 + .08 * c[1]) : c[2];
+    let along = Math.max(.1, plays(c[1]) + p.along * sdAlong * S.disp);
+    let side = p.side * radius * S.disp / 2 + S.missM;
+    const mishitP = Math.min(.5, S.mishit * (/driver|wood/i.test(c[0]) ? .10 : c[1] >= 170 ? .08 : c[1] >= 120 ? .06 : .04));
+    if (p.mishit < mishitP) { along *= .55 + .3 * p.severity; side *= 1.6; }
+    let landing = [x + ex * along + ey * side, y + ey * along - ex * side];
+    along = Math.max(.1, along - S.elevK * rise([x, y], landing));
+    landing = [x + ex * along + ey * side, y + ey * along - ex * side];
+    const startZ = Z(x, y), endZ = Z(...landing), flightLen = distance([x, y], landing);
+    const apex = (APEX[c[0]] ?? 25) * Math.min(1, c[1] / 60);
+    if (hole.hasTrees !== false && S.treeH > 0 && p.tree < .7) {
+      const n = Math.max(2, Math.ceil(flightLen / 2));
+      for (let i = 1; i < n; i++) {
+        const t = i / n;
+        if (t * flightLen < (fromTee ? 20 : 2)) continue;
+        const pos = [x + (landing[0] - x) * t, y + (landing[1] - y) * t];
+        const arc = t <= .6 ? apex * (1 - ((.6 - t) / .6) ** 2) :
+          apex * (1 - ((t - .6) / .4) ** 2);
+        const terrainZ = Z(...pos);
+        const height = startZ == null || endZ == null || terrainZ == null ? arc :
+          startZ + (endZ - startZ) * t + arc - terrainZ;
+        if (height < S.treeH && hole.lie(...pos) === "T")
+          return { x: pos[0], y: pos[1], k: "T", hit: true, prov: hole.provenanceAt ? hole.provenanceAt(...pos) : "marked" };
+      }
+    }
+    const l = hole.lie(...landing);
+    if (!legal(l)) return { x: landing[0], y: landing[1], k: l, prov: hole.provenanceAt ? hole.provenanceAt(...landing) : "marked" };
+    const roll = (ROLL[l] ?? 2) * (.6 + p.roll * .8) * Math.min(1, c[1] / 60);
+    const end = [landing[0] + ex * roll, landing[1] + ey * roll];
+    if (hole.pathStops) { const st = hole.pathStops(landing, end);
+      if (st.k === "T" && hole.provenanceAt) st.prov = hole.provenanceAt(st.x, st.y);
+      return st; }
+    for (let i = 0, n = Math.max(1, Math.ceil(roll / .5)); i <= n; i++) {
+      const pos = [landing[0] + (end[0] - landing[0]) * i / n, landing[1] + (end[1] - landing[1]) * i / n];
+      const k = hole.lie(...pos);
+      if (!legal(k) || k === "S" || k === "T") return { x: pos[0], y: pos[1], k };
+    }
+    return { x: end[0], y: end[1], k: hole.lie(...end) };
+  }
+  // Stroke and distance is deliberately conservative and always returns a playable origin.
+  function recover(o, origin) {
+    if (legal(o.k)) return { x: o.x, y: o.y, k: o.k, penalty: 0 };
+    if (o.k === "W") {
+      // penalty area: one stroke, drop on the first dry, playable ground back along the line of flight
+      const dx = origin[0] - o.x, dy = origin[1] - o.y, L = Math.hypot(dx, dy);
+      for (let s = 1; s < L; s += 1) {
+        const q = [o.x + dx * s / L, o.y + dy * s / L], k = hole.lie(...q);
+        if (legal(k) && k !== "W") {
+          const r = Math.min(L, s + 2), dropAt = [o.x + dx * r / L, o.y + dy * r / L], kd = hole.lie(...dropAt);
+          return legal(kd) && kd !== "W" ? { x: dropAt[0], y: dropAt[1], k: kd, penalty: 1 } : { x: q[0], y: q[1], k, penalty: 1 };
+        }
+      }
+    }
+    // OB and off-map: stroke and distance
+    return { x: origin[0], y: origin[1], k: hole.lie(...origin), penalty: 1 };
+  }
+  function candidates(x, y, l, fromTee) {
+    const d = dPin(x, y);
+    let bag = S.bag.filter(c => fromTee || !/driver/i.test(c[0]));
+    if (l === "S") bag = bag.filter(c => /wedge|pw|sw|lw|°|chip/i.test(c[0]) || c[1] <= 105);
+    if (l === "T") return [["Punch", Math.min(70, Math.max(2, d * .75)), 12],
+      ["Chip", Math.min(25, Math.max(.5, d * .8)), 4]];
+    // Generated recovery/short-game shots keep custom sparse bags and tiny holes usable.
+    if (!bag.length) bag = [["Recovery wedge", Math.min(60, Math.max(.5, d * .85)), 6]];
+    const sorted = bag.slice().sort((a, b) => Math.abs(a[1] - d) - Math.abs(b[1] - d));
+    const result = (fromTee ? bag : sorted.slice(0, 4)).map(c => c.slice());
+    if (!fromTee && d > 150) for (const leave of [70, 100]) {
+      const c = bag.slice().sort((a, b) => Math.abs(a[1] - (d - leave)) - Math.abs(b[1] - (d - leave)))[0];
+      if (!result.some(q => q[0] === c[0] && q[1] === c[1])) result.push(c.slice());
+    }
+    if (d < 110) {
+      const adjusted = Math.max(.5, (d - (l === "S" ? 1 : 2)) / (1 + S.wind * .7 / 150));
+      const wedges = bag.filter(c => (/wedge|pw|sw|lw|°|chip/i.test(c[0]) || c[1] <= 105) &&
+        (l !== "S" || !/chip/i.test(c[0]))).sort((a, b) => a[1] - b[1]);
+      const wedge = wedges.find(c => c[1] >= adjusted) || (wedges.length ? null : ["Recovery wedge", 110, 6]);
+      if (wedge)
+        result.push([wedge[0], adjusted, Math.max(.6, wedge[2] * adjusted / wedge[1]), "partial"]);
+      if (d < 35 && l !== "S") result.push(["Chip", Math.max(.5, (d - 1) / (1 + S.wind * .7 / 150)), Math.max(.6, d * .08), "partial"]);
+    }
+    return result.filter((c, i) => result.findIndex(q => q[0] === c[0] && q[1] === c[1]) === i);
+  }
+  function targets(x, y) {
+    return [null, ...(hole.via || []).filter(v => distance([x, y], v) > 8 && dPin(...v) < dPin(x, y) - 8)];
+  }
+  function actions(x, y, fromTee, full) {
+    const l = fromTee ? "F" : hole.lie(x, y), offs = full ? [-36, -24, -18, -12, -6, 0, 6, 12, 18, 24, 36] : [-9, 0, 9];
+    const result = [];
+    for (const club of candidates(x, y, l, fromTee))
+      for (const tgt of targets(x, y)) for (const off of offs) result.push({ club, off, tgt });
+    return result;
+  }
+  function screen(x, y, o, fromTee, packets) {
+    let sum = 0, trouble = 0;
+    for (const p of packets) {
+      const shot = sampleShot(x, y, o, fromTee, p), r = recover(shot, [x, y]);
+      sum += 1 + r.penalty + es(r.k, r.x, r.y);
+      if (["S", "T", "W", "O", "X"].includes(shot.k)) trouble++;
+    }
+    return { mean: sum / packets.length, trouble: trouble / packets.length };
+  }
+  const policyCache = new Map(), planCache = new Map(), evidenceCache = new Map();
+  const STYLE_STEP = .15;   // later shots may give up this much (screened) to play in style
+  function policyAt(x, y, style = "optimise") {
+    const l = hole.lie(x, y);
+    if (!legal(l)) throw new RangeError("Cannot play a shot from water, OB or off-map ground.");
+    if (l === "G") return null;
+    // Lazy, canonical 6 m policy cells: never clamp out-of-map positions to an edge.
+    const ix = Math.floor(x / 6), iy = Math.floor(y / 6), key = `cell|${ix}|${iy}|${l}|${style}`;
+    if (policyCache.has(key)) return policyCache.get(key);
+    let cx = (ix + .5) * 6, cy = (iy + .5) * 6;
+    // A cell straddling a hazard/green uses the actual point and exact-point cache key.
+    const canonical = hole.lie(cx, cy) === l && dPin(cx, cy) > 18;
+    const actualKey = canonical ? key : `point|${x}|${y}|${l}|${style}`;
+    if (policyCache.has(actualKey)) return policyCache.get(actualKey);
+    if (!canonical) { cx = x; cy = y; }
+    const ps = samples(`policy|${actualKey}`, S.policySamples);
+    const list = actions(cx, cy, false, false).map(o => ({ ...o, ...screen(cx, cy, o, false, ps) }));
+    list.sort((a, b) => a.mean - b.mean || actionKey(a).localeCompare(actionKey(b)));
+    let best = list[0];
+    if (style !== "optimise") {
+      const near = list.filter(o => o.mean <= list[0].mean + STYLE_STEP);
+      best = style === "aggressive"
+        ? near.sort((a, b) => b.club[1] - a.club[1] || Math.abs(a.off) - Math.abs(b.off) || a.mean - b.mean)[0]
+        : near.sort((a, b) => a.trouble - b.trouble || a.mean - b.mean)[0];
+    }
+    if (policyCache.size >= 12000) policyCache.clear();
+    policyCache.set(actualKey, best);
+    return best;
+  }
+  function playOut(x, y, first, fromTee, packets, style = "optimise") {
+    let strokes = 0, cx = x, cy = y, tee = fromTee, o = first, firstShot;
+    const chain = [];
+    for (let step = 0; step < S.maxShots; step++) {
+      const l = hole.lie(cx, cy), p = packets[step];
+      if (!o && l === "G") {
+        const mean = Math.max(1, es("G", cx, cy)), low = Math.floor(mean);
+        return { score: strokes + low + (p.putt < mean - low ? 1 : 0), completed: true, chain, firstShot };
+      }
+      o = o || policyAt(cx, cy, style);
+      if (!o) throw new Error("No playable action.");
+      const aim = aimPoint(cx, cy, o), shot = sampleShot(cx, cy, o, tee, p), r = recover(shot, [cx, cy]);
+      if (!firstShot) firstShot = shot;
+      chain.push({ club: o.club[0], carry: Math.round(plays(o.club[1])), from: [cx, cy], aim,
+        rest: [r.x, r.y], outcome: shot.k, penalty: r.penalty, lie: NAME[r.k],
+        left: Math.round(dPin(r.x, r.y)), rise: Math.round(rise([cx, cy], [r.x, r.y])) });
+      strokes += 1 + r.penalty; cx = r.x; cy = r.y; tee = tee && r.penalty > 0; o = null;
+    }
+    if (hole.lie(cx, cy) === "G") {
+      const mean = Math.max(1, es("G", cx, cy)), low = Math.floor(mean);
+      return { score: strokes + low + (packets[S.maxShots - 1].putt < mean - low ? 1 : 0),
+        completed: true, chain, firstShot };
+    }
+    // Report non-completion explicitly, adding a labelled heuristic tail rather than fabricated putts.
+    return { score: strokes + es(hole.lie(cx, cy), cx, cy), completed: false, chain, firstShot };
+  }
+  function evidence(x, y, o, fromTee, trials, style = "optimise") {
+    const runs = trials.map(ps => playOut(x, y, o, fromTee, ps, style)), scores = runs.map(r => r.score);
+    const n = scores.length, avg = scores.reduce((a, b) => a + b, 0) / n;
+    const variance = scores.reduce((s, v) => s + (v - avg) ** 2, 0) / (n - 1);
+    const se = Math.sqrt(variance / n), sorted = scores.slice().sort((a, b) => a - b);
+    const mix = {};
+    let trouble = 0, completed = 0, birdie = 0, bogey = 0, dbl = 0;
+    const sources = { T: { marked: 0, surface: 0, assumed: 0, outside: 0 }, O: { marked: 0, surface: 0, assumed: 0, outside: 0 } };
+    for (const r of runs) {
+      const k = r.firstShot.k; mix[k] = (mix[k] || 0) + 1 / n;
+      if (sources[k]) sources[k][r.firstShot.prov || "marked"] += 1 / n;
+      if (["S", "T", "W", "O", "X"].includes(k)) trouble++;
+      if (r.completed) { completed++; if (r.score <= S.par - 1) birdie++;
+        if (r.score >= S.par + 1) bogey++; if (r.score >= S.par + 2) dbl++; }
+    }
+    const representative = runs.slice().sort((a, b) => Math.abs(a.score - sorted[Math.floor(n / 2)]) -
+      Math.abs(b.score - sorted[Math.floor(n / 2)]))[0];
+    const wilson = k => {
+      const z2 = 1.96 ** 2, p = k / n, centre = (p + z2 / (2 * n)) / (1 + z2 / n);
+      const half = 1.96 * Math.sqrt(p * (1 - p) / n + z2 / (4 * n * n)) / (1 + z2 / n);
+      return [Math.max(0, centre - half), Math.min(1, centre + half)];
+    };
+    return { ...o, avg, v: avg, good: sorted[Math.floor(.25 * (n - 1))],
+      bad: sorted[Math.floor(.8 * (n - 1))], trouble: trouble / n, mix,
+      pBirdie: completed === n ? birdie / n : null,
+      pBogey: completed === n ? bogey / n : null, pDouble: completed === n ? dbl / n : null,
+      completedFraction: completed / n, incompleteFraction: 1 - completed / n,
+      sampleCount: n, standardError: se, confidence95: [avg - 1.96 * se, avg + 1.96 * se],
+      probability95: completed === n ? { birdie: wilson(birdie), bogey: wilson(bogey), double: wilson(dbl) } : null,
+      sources, completedRuns: runs.map(r => r.completed),
+      cloud: runs.map(r => r.firstShot), chain: representative.chain,
+      chainCompleted: representative.completed, scores };
+  }
+  /* Strategies by style, each within styleCost strokes of the best simulated average:
+     aggressive = the boldest option (longest club, then nearest the flag line, then most birdies);
+     safe = fewest doubles-or-worse plus half the shot's trouble rate;
+     optimise = lowest average. (Percentiles of whole-number hole scores tie almost always,
+     which made all three identical in testing.) */
+  function pick(list, style) {
+    const bestMean = Math.min(...list.map(o => o.avg));
+    const viable = style === "optimise" ? list : list.filter(o => o.avg <= bestMean + S.styleCost);
+    const tie = (a, b) => a.avg - b.avg || actionKey(a).localeCompare(actionKey(b));
+    if (style === "aggressive") return viable.slice().sort((a, b) => b.club[1] - a.club[1] ||
+      Math.abs(a.off) - Math.abs(b.off) || (b.pBirdie ?? 0) - (a.pBirdie ?? 0) || tie(a, b))[0];
+    if (style === "safe") return viable.slice().sort((a, b) =>
+      ((a.pDouble ?? a.incompleteFraction) + .5 * a.trouble) - ((b.pDouble ?? b.incompleteFraction) + .5 * b.trouble) || tie(a, b))[0];
+    return viable.slice().sort(tie)[0];
+  }
+  function publicOption(o) {
+    const { cloud, chain, scores, chainCompleted, ...option } = o;
+    return option;
+  }
+  function planFrom(x, y, fromTee) {
+    point([x, y]);
+    const l = hole.lie(x, y);
+    if (!legal(l)) throw new RangeError("Move to a legal relief/replay position before requesting a plan.");
+    const key = `${x}|${y}|${fromTee}`;
+    if (planCache.has(key)) return clone(planCache.get(key));
+    if (l === "G" && !fromTee) {
+      const expected = es(l, x, y);
+      const base = { best: { club: ["Putt", dPin(x, y), 0], off: 0, tgt: null, avg: expected, v: expected },
+        options: [], cloud: [], chain: [], expected, pBirdie: null, pBogey: null, pDouble: null,
+        toPin: dPin(x, y), status: "putt", warnings };
+      const out = { ...base, strategies: { optimise: base, safe: base, aggressive: base }, agree: true,
+        climb: zPin == null || Z(x, y) == null ? null : zPin - Z(x, y) };
+      return clone(out);
+    }
+    const ps = samples(`screen|${key}`, S.samples);
+    const tried = actions(x, y, fromTee, true).map(o => ({ ...o, ...screen(x, y, o, fromTee, ps) }));
+    tried.sort((a, b) => a.mean - b.mean || actionKey(a).localeCompare(actionKey(b)));
+    const pool = [], seen = new Set();
+    const add = o => { const k = actionKey(o); if (!seen.has(k)) { seen.add(k); pool.push(o); } };
+    tried.slice(0, 5).forEach(add);
+    const byClub = new Map();
+    for (const o of tried) {
+      const k = JSON.stringify(o.club);
+      if (!byClub.has(k)) byClub.set(k, []);
+      byClub.get(k).push(o);
+    }
+    for (const list of byClub.values()) {
+      add(list[0]);
+      add(list.filter(o => o.mean <= list[0].mean + .3).sort((a, b) => a.trouble - b.trouble || a.mean - b.mean)[0]);
+    }
+    // Every option and every strategy sees exactly the same trial/step random packets.
+    const trials = Array.from({ length: S.samples }, (_, i) => samples(`rollout|${key}|${i}`, S.maxShots));
+    const scored = pool.map(o => evidence(x, y, o, fromTee, trials));
+    /* Strategies (paired, whole-plan):
+       Optimise = lowest simulated average.
+       Safe = lowest chance of double bogey or worse; Aggressive = highest chance of birdie or better.
+       A Safe/Aggressive plan is evaluated as a WHOLE plan (first shot + later shots played in that
+       style) on the SAME trials as Optimise. It is used only if (1) its paired average costs at most
+       styleCost strokes and (2) it improves its own goal by more than 1.96 paired standard errors.
+       Otherwise the strategy equals Optimise, with the reason stated. */
+    const optBest = pick(scored, "optimise");
+    const paired = (a, b) => { const d = a.map((v, i) => v - b[i]), n = d.length, m = d.reduce((s, v) => s + v, 0) / n;
+      const se = Math.sqrt(d.reduce((s, v) => s + (v - m) ** 2, 0) / Math.max(1, n - 1) / n); return { mean: m, se, ci95: [m - 1.96 * se, m + 1.96 * se] }; };
+    const flags = (ev, goal) => ev.scores.map((s, i) => goal === "safe" ? (!ev.completedRuns[i] || s >= S.par + 2 ? 1 : 0) : (ev.completedRuns[i] && s <= S.par - 1 ? 1 : 0));
+    const strategyOf = (best, style, verdict) => {
+      const perClub = new Map();
+      for (const o of scored) { const k = JSON.stringify(o.club); if (!perClub.has(k) || o.avg < perClub.get(k).avg) perClub.set(k, o); }
+      const alternatives = [...perClub.values()].filter(o => actionKey(o) !== actionKey(best)).sort((a, b) => a.avg - b.avg);
+      // is the plan actually better than the next-best club, or a near-tie?
+      let comparison = null;
+      const next = alternatives[0];
+      if (next && next.scores && best.scores && next.scores.length === best.scores.length) {
+        const c = paired(best.scores, next.scores);
+        comparison = { versus: `${next.club[0]} ${next.tgt ? "to the corner" : next.off + " m"}`, meanDifference: c.mean, pairedConfidence95: c.ci95,
+          distinguishable: Math.abs(c.mean) > 1.96 * c.se };
+      }
+      return { best: publicOption(best), comparison, options: [best, ...alternatives].slice(0, 3).map(publicOption),
+        cloud: best.cloud, chain: best.chain, chainCompleted: best.chainCompleted,
+        expected: best.avg, pBirdie: best.pBirdie, pBogey: best.pBogey, pDouble: best.pDouble,
+        sources: best.sources, toPin: dPin(x, y), status: best.incompleteFraction ? "incomplete-model-tail" : "simulated",
+        uncertainty: { note: "Sampling noise only; says nothing about map or player-model error.",
+          standardError: best.standardError, confidence95: best.confidence95, probability95: best.probability95, sampleCount: best.sampleCount },
+        verdict, incompleteFraction: best.incompleteFraction, warnings };
+    };
+    const strategies = { optimise: strategyOf(optBest, "optimise", { style: "optimise", chosen: true, reason: "Lowest simulated average." }) };
+    for (const style of ["safe", "aggressive"]) {
+      const goal = style === "safe" ? "pDouble" : "pBirdie", better = style === "safe" ? 1 : -1;   // safe: lower is better
+      const shortlist = scored.slice().sort((a, b) => better * ((a[goal] ?? 1) - (b[goal] ?? 1)) || a.avg - b.avg).slice(0, 6);
+      if (!shortlist.some(o => actionKey(o) === actionKey(optBest))) shortlist.push(optBest);
+      const baseFlags = flags(optBest, style);
+      let chosen = null, tested = 0;
+      for (const cand of shortlist) {
+        const plan = evidence(x, y, cand, fromTee, trials, style); tested++;
+        const cost = paired(plan.scores, optBest.scores), gain = paired(flags(plan, style), baseFlags);
+        const improves = style === "safe" ? gain.mean < -1.96 * gain.se && gain.mean < 0 : gain.mean > 1.96 * gain.se && gain.mean > 0;
+        if (cost.mean <= S.styleCost && improves) {
+          const score = style === "safe" ? gain.mean : -gain.mean;
+          if (!chosen || score < chosen.score - 1e-12 || (Math.abs(score - chosen.score) < 1e-12 && cost.mean < chosen.cost.mean)) chosen = { plan, cost, gain, score };
+        }
+      }
+      if (chosen) {
+        const what = style === "safe" ? "doubles or worse" : "birdies or better";
+        strategies[style] = strategyOf(chosen.plan, style, { style, chosen: true, candidatesTested: tested,
+          reason: `Changes ${what} by ${(100 * chosen.gain.mean).toFixed(1)} points (95% ${(100 * chosen.gain.ci95[0]).toFixed(1)} to ${(100 * chosen.gain.ci95[1]).toFixed(1)}) for ${chosen.cost.mean >= 0 ? "+" : ""}${chosen.cost.mean.toFixed(2)} strokes (95% ${chosen.cost.ci95[0].toFixed(2)} to ${chosen.cost.ci95[1].toFixed(2)}), paired over ${optBest.scores.length} trials.`,
+          goalChange: chosen.gain, costChange: chosen.cost });
+      } else {
+        strategies[style] = strategyOf(optBest, style, { style, chosen: false, candidatesTested: tested,
+          reason: style === "safe"
+            ? `No plan within ${S.styleCost} strokes cuts doubles-or-worse by more than simulation noise; Safe = Optimise.`
+            : `No plan within ${S.styleCost} strokes raises birdies-or-better by more than simulation noise; Aggressive = Optimise.` });
+      }
+    }
+    // Optimise must be the lowest average of the plans shown: adopt a styled plan that beat it
+    for (const style of ["aggressive", "safe"])
+      if (strategies[style].verdict.chosen && strategies[style].expected < strategies.optimise.expected - 1e-9)
+        strategies.optimise = { ...strategies[style], verdict: { style: "optimise", chosen: true,
+          reason: `Lowest simulated average (a ${style} plan scored lower than the default plan, so Optimise uses it).` } };
+    const out = { ...strategies.optimise, strategies,
+      agree: actionKey(strategies.safe.best) === actionKey(strategies.optimise.best) &&
+        actionKey(strategies.aggressive.best) === actionKey(strategies.optimise.best),
+      climb: zPin == null || Z(x, y) == null ? null : Math.round(zPin - Z(x, y)) };
+    if (planCache.size >= 64) { planCache.clear(); evidenceCache.clear(); }
+    evidenceCache.set(key, scored);
+    planCache.set(key, clone(out));
+    return clone(out);
+  }
+  function teeByClub(n = S.samples) {
+    integer(n, "teeByClub samples", 16, 4096);
+    planFrom(0, 0, true);
+    const scored = evidenceCache.get("0|0|true");
+    const trials = n === S.samples ? null :
+      Array.from({ length: n }, (_, i) => samples(`rollout|0|0|true|${i}`, S.maxShots));
+    const rows = [];
+    for (const name of new Set(scored.map(o => o.club[0]))) {
+      const bestAim = scored.filter(o => o.club[0] === name).sort((a, b) => a.avg - b.avg ||
+        actionKey(a).localeCompare(actionKey(b)))[0];
+      const score = trials ? evidence(0, 0, bestAim, true, trials) : bestAim;
+      rows.push({ club: name, carry: bestAim.club[1], off: bestAim.off, corner: !!bestAim.tgt,
+        tgt: bestAim.tgt, avg: score.avg, pBirdie: score.pBirdie, pBogey: score.pBogey,
+        pDouble: score.pDouble, confidence95: score.confidence95,
+        incompleteFraction: score.incompleteFraction, sampleCount: n });
+    }
+    return rows;
+  }
+  return { teeByClub, planTee: () => planFrom(0, 0, true), planFrom: (x, y) => planFrom(x, y, false),
+    lie: hole.lie, es, warnings: warnings.slice(), model: "deterministic-heuristic-monte-carlo" };
 }
 
 const api = { DEFAULT_BAG, NAME, buildHole, makeCaddie, projector };
-if (typeof module !== "undefined" && module.exports) module.exports = api; else root.CaddieEngine = api;
+if (typeof module !== "undefined" && module.exports) module.exports = api;
+else root.CaddieEngine = api;
 })(typeof window !== "undefined" ? window : globalThis);

@@ -605,6 +605,15 @@ function elevAt(lon,lat){
   return h(x0,y0)*(1-ax)*(1-ay)+h(x0+1,y0)*ax*(1-ay)+h(x0,y0+1)*(1-ax)*ay+h(x0+1,y0+1)*ax*ay;
 }
 
+/* the OSM course outline is used for OB only on holes it really covers */
+function outlineCovers(h){
+  if(!COURSE.length)return false;
+  const line=draw.getAll().features.find(f=>f.properties.kind==="holeline"&&+f.properties.hole===h); if(!line)return false;
+  const L=turf.length(line,{units:"kilometers"}); let n=0,k=0;
+  for(let s=0;s<=L;s+=.005){n++; const p=turf.along(line,s,{units:"kilometers"}); if(COURSE.some(c=>turf.booleanPointInPolygon(p,c)))k++;}
+  return n>0&&k/n>=.95;
+}
+
 /* ---------- strategies ---------- */
 let STRAT="optimise", LAST=null;
 document.querySelectorAll("#strat button").forEach(b=>b.addEventListener("click",()=>{
@@ -642,12 +651,16 @@ function runPlan(){
   setTimeout(async()=>{
     let H,C,p;
     try{
-      H=E.buildHole({type:"FeatureCollection",features:[...fc.features,...COURSE]},hole(),$("fromTee").value||ts[0].properties.tee,{surface:SAMPLE||undefined});
+      H=E.buildHole({type:"FeatureCollection",features:[...fc.features,...COURSE]},hole(),$("fromTee").value||ts[0].properties.tee,{
+        surface:SAMPLE||undefined,
+        unmarkedLie:SAMPLE?"U":"R",            // with an auto-map, anything it missed is uncertain
+        corridor:SAMPLE?0:32,                   // without one, far-from-the-line ground is assumed trees
+        courseBoundaryIsOB:outlineCovers(hole())});
       let elev=null;
       if($("useElev").checked){const [w,s,e,n]=turf.bbox({type:"FeatureCollection",features:[[H.bbox[0],H.bbox[1]],[H.bbox[2],H.bbox[3]]].map(xy=>turf.point(H.P.from(xy)))});
         await ensureDEM(w,s,e,n); elev=(x,y)=>elevAt(...H.P.from([x,y]));}
       C=E.makeCaddie(H,{bag:BAG,off:+$("off").value/100,treeH:+$("treeH").value,disp:+$("disp").value/100,missM:+$("miss").value,
-        par:+$("par").value,mishit:+$("mis").value/100,elev});
+        par:+$("par").value,mishit:+$("mis").value/100,elev,samples:192});
       if(fromMe){const [x,y]=H.P.to(me);if(H.lie(x,y)==="X"){$("plan").innerHTML='<p class="empty warn">You are outside the mapped hole. Stand on the hole, or plan from the tee.</p>';return;}
         p=C.planFrom(x,y);} else p=C.planTee();
     }catch(err){$("plan").innerHTML=`<p class="empty warn">${err.message}</p>`;return;}
@@ -657,29 +670,36 @@ function runPlan(){
 function sideText(o){return o.off===0?"at the flag line":`${Math.abs(o.off)} m ${o.off>0?"right":"left"} of the flag line`;}
 function showPlan(H,pAll){
   const p=pAll.strategies?Object.assign({},pAll,pAll.strategies[STRAT]):pAll;
-  const b=p.best,pc=v=>Math.round(100*(v||0))+"%",m=b.mix||p.options[0].mix;
+  const b=p.best,pc=v=>v==null?"–":Math.round(100*v)+"%",m=b.mix||(p.options[0]&&p.options[0].mix)||{};
   const S3=pAll.strategies||{}, NAMES={aggressive:"Aggressive",optimise:"Optimise",safe:"Safe"};
   const base=S3.optimise?S3.optimise.expected:0;
   const aimOf=q=>q.best.tgt?"corner":(q.best.off?`${Math.abs(q.best.off)}${q.best.off>0?"R":"L"}`:"flag");
   const cmp=Object.keys(NAMES).filter(k=>S3[k]).map(k=>{const q=S3[k],d=q.expected-base;
-    return `<tr${k===STRAT?' style="font-weight:600"':''}><td>${NAMES[k]}</td><td>${q.best.club[0]} · ${aimOf(q)}</td><td>${q.expected.toFixed(2)}${k!=="optimise"&&Math.abs(d)>=.01?` (${d>0?"+":""}${d.toFixed(2)})`:""}</td><td>${pc(q.pBirdie)}</td><td>${pc(q.pDouble)}</td></tr>`;}).join("");
-  const agreeNote=pAll.agree?`<p class="empty" style="margin:2px 0 6px">All three agree on this hole: the best-average play is also the boldest and the safest within reach, so there's nothing to trade.</p>`:
-    `<p class="empty" style="margin:2px 0 6px">Aggressive is the boldest play and Safe the one with least trouble, each within 0.3 strokes of the best average.</p>`;
+    const same=k!=="optimise"&&q.verdict&&!q.verdict.chosen;
+    return `<tr${k===STRAT?' style="font-weight:600"':''}><td>${NAMES[k]}${same?' <span class="empty">= Optimise</span>':''}</td><td>${q.best.club[0]} · ${aimOf(q)}</td><td>${q.expected.toFixed(2)}${k!=="optimise"&&Math.abs(d)>=.01?` (${d>0?"+":""}${d.toFixed(2)})`:""}</td><td>${pc(q.pBirdie)}</td><td>${pc(q.pDouble)}</td></tr>`;}).join("");
+  const sel=S3[STRAT]||p, v=sel.verdict, u=sel.uncertainty, cmpN=sel.comparison, src=sel.sources||{};
+  const pct=x=>Math.round(100*x)+"%", part=(o,label)=>{const bits=[["marked","your marks"],["surface","auto-map"],["assumed","assumed default"],["outside","off the map"]]
+      .filter(([k])=>(o[k]||0)>=.005).map(([k,n])=>`${n} ${pct(o[k])}`);return bits.length?`${label}: ${bits.join(", ")}`:"";};
+  const srcLine=[part(src.T||{},"Trees hit"),part(src.O||{},"OB")].filter(Boolean).join(" · ");
+  const agreeNote=`<p class="empty" style="margin:2px 0 4px">${v?v.reason:""}</p>`+
+    (cmpN&&!cmpN.distinguishable?`<p class="empty" style="margin:0 0 4px">Near-tie: ${cmpN.versus} is within simulation noise of this plan — either is reasonable.</p>`:"")+
+    (u&&u.confidence95?`<p class="empty" style="margin:0 0 4px">Average ${sel.expected.toFixed(2)} (${u.confidence95.map(x=>x.toFixed(2)).join("–")}, ${u.sampleCount} simulated holes). This range is simulation noise only — not map or player-model error.</p>`:"")+
+    (srcLine?`<p class="empty" style="margin:0 0 6px">Where the trouble comes from — ${srcLine}.</p>`:"");
   const climb=pAll.climb;
-  const rows=p.options.map((o,i)=>`<tr${i?"":' style="font-weight:600"'}><td>${o.club[0]}</td><td>${o.v.toFixed(2)}</td><td>${pc(o.mix.F)}</td><td>${pc((o.mix.R||0)+(o.mix.S||0))}</td><td>${pc(o.mix.T)}</td><td>${pc((o.mix.O||0)+(o.mix.X||0))}</td></tr>`).join("");
+  const rows=p.options.map((o,i)=>{const mx=o.mix||{},g=k=>mx[k]||0;return `<tr${i?"":' style="font-weight:600"'}><td>${o.club[0]}</td><td>${o.v.toFixed(2)}</td><td>${pc(g("F")+g("G"))}</td><td>${pc(g("R")+g("S")+g("U"))}</td><td>${pc(g("T"))}</td><td>${pc(g("O")+g("X")+g("W"))}</td></tr>`;}).join("");
   $("plan").innerHTML=`<div class="rec">${b.club[0]} · ${Math.round(b.club[1])} m</div>
     <div class="sub">Aim ${sideText(b)}. Average ${p.expected.toFixed(2)}${fromMe?` from ${Math.round(p.toPin)} m`:" for the hole"}${climb!=null&&Math.abs(climb)>=2?` · plays ${climb>0?"uphill":"downhill"} ${Math.abs(climb)} m`:""}.</div>
     <table style="margin:6px 0 2px"><tr><th>Strategy</th><th>First shot</th><th>Average</th><th>Birdie+</th><th>Double+</th></tr>${cmp}</table>${agreeNote}
     <ol>${p.chain.map(s=>`<li>${s.club} ${s.carry} m → ${s.left} m left, ${s.lie}${s.rise&&Math.abs(s.rise)>=3?` (${s.rise>0?"+":""}${s.rise} m)`:""}</li>`).join("")}</ol>
     <table style="margin-top:6px"><tr><th>Option</th><th>Score</th><th>Fairway</th><th>Rough/sand</th><th>Trees</th><th>OB</th></tr>${rows}</table>
-    ${H.warnings.length?`<p class="empty warn" style="margin-top:6px">${H.warnings.join(" ")}</p>`:""}`;
+    ${H.warnings.length?`<details style="margin-top:6px"><summary class="empty">Assumptions on this hole (${H.warnings.length})</summary><p class="empty">${H.warnings.join("<br>")}</p></details>`:""}`;
   drawPlan(H,p);
 }
 const OUTC={F:"#7ee06a",G:"#e9ff9a",R:"#3f7a37",S:"#f2d27a",T:"#e2462f",hit:"#e2462f",W:"#3b8fd6",O:"#d63bd6",X:"#d63bd6"};
 function clearPlanLayers(){for(const id of["plan-cloud","plan-line"]){if(map.getSource(id))map.getSource(id).setData({type:"FeatureCollection",features:[]});}}
 function drawPlan(H,p){
   const ll=xy=>H.P.from(xy);
-  const lines=p.chain.map(s=>({type:"Feature",properties:{label:`${s.club} ${s.carry} m`},geometry:{type:"LineString",coordinates:[ll(s.from),ll(s.aim)]}}));
+  const lines=p.chain.map(s=>({type:"Feature",properties:{label:`${s.club} ${s.carry} m`},geometry:{type:"LineString",coordinates:[ll(s.from),ll(s.rest||s.aim)]}}));
   const pts=p.cloud.map(o=>({type:"Feature",properties:{c:OUTC[o.k]||"#fff"},geometry:{type:"Point",coordinates:ll([o.x,o.y])}}));
   const set=(id,data)=>{if(map.getSource(id))map.getSource(id).setData(data);};
   if(!map.getSource("plan-line")){
