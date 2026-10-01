@@ -726,7 +726,46 @@ function makeCaddie(hole, opts = {}) {
     }
     return rows;
   }
-  return { teeByClub, planTee: () => planFrom(0, 0, true), planFrom: (x, y) => planFrom(x, y, false),
+  /* Zone search — the golfer's method. For each club the landing distance is fixed by the club
+     (a driver lands on its own arc, never beyond its reach). Slide the aim along that arc and keep
+     the direction whose simulated landing pattern sits furthest from trouble, ranked in the golfer's
+     order: water/OB/off-map > bunker > trees > uncertain > rough > fairway/green.
+     Every club and direction is judged on the same simulated shots (common random numbers). */
+  const ZONE_WEIGHT = { W: 1, O: 1, X: 1, S: .7, T: .55, hit: .55, U: .35, R: .15, F: 0, G: 0 };
+  function zoneSearch(x, y, opts = {}) {
+    point([x, y]);
+    const fromTee = !!opts.fromTee, n = opts.samples || S.samples;
+    const w = Object.assign({}, ZONE_WEIGHT, opts.weights || {});
+    const clubs = S.bag.filter(c => !opts.clubs || opts.clubs.includes(c[0]));
+    const span = opts.spanDeg == null ? 30 : opts.spanDeg, step = opts.stepDeg || 1;
+    const base = Math.atan2(pin[1] - y, pin[0] - x);
+    const dirTgt = a => { const th = base + a * Math.PI / 180; return [x + Math.cos(th) * 2000, y + Math.sin(th) * 2000]; };
+    const ps = samples(`zone|${x}|${y}|${fromTee}`, n);
+    const out = [];
+    for (const c of clubs) {
+      let best = null; const scan = [];
+      for (let a = -span; a <= span + 1e-9; a += step) {
+        const o = { club: c, off: 0, tgt: dirTgt(a) }, mix = {}, left = [];
+        let penalty = 0;
+        for (const p of ps) {
+          const r = sampleShot(x, y, o, fromTee, p), k = r.hit ? "hit" : r.k;
+          mix[k] = (mix[k] || 0) + 1 / n;
+          penalty += (w[k] == null ? .35 : w[k]) / n;
+          left.push(dPin(r.x, r.y));
+        }
+        left.sort((p, q) => p - q);
+        const row = { angle: a, aim: aimPoint(x, y, o), penalty, mix, medianLeft: left[Math.floor(left.length / 2)] };
+        scan.push({ angle: a, penalty });
+        // furthest from trouble; near-ties (within 0.005) go to the line that leaves less to the flag
+        if (!best || penalty < best.penalty - .005 || (Math.abs(penalty - best.penalty) <= .005 && row.medianLeft < best.medianLeft)) best = row;
+      }
+      const o = { club: c, off: 0, tgt: dirTgt(best.angle) };
+      out.push(Object.assign({ club: c[0], carry: c[1], width: c[2] }, best,
+        { cloud: ps.slice(0, 160).map(p => sampleShot(x, y, o, fromTee, p)), scan }));
+    }
+    return out;
+  }
+  return { zoneSearch, teeByClub, planTee: () => planFrom(0, 0, true), planFrom: (x, y) => planFrom(x, y, false),
     lie: hole.lie, es, warnings: warnings.slice(), model: "deterministic-heuristic-monte-carlo" };
 }
 
