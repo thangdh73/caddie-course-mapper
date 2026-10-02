@@ -333,16 +333,21 @@ function makeCaddie(hole, opts = {}) {
   if (!opts || typeof opts !== "object") throw new TypeError("Invalid caddie options.");
   const S = { bag: DEFAULT_BAG, off: .25, treeH: 15, disp: 1, missM: 0, wind: 0,
     seed: 7, elev: null, elevK: 1, par: 4, mishit: 1, samples: 96, policySamples: 12,
+    zoneTol: .10,           // a landing zone is acceptable if its weighted trouble score is at most this
+    zoneRank: "closest",    // among acceptable zones: "closest" to the hole (the golfer's rule) or best expected "average"
+    zonePolicySamples: 16,  // simulated shots per direction when the zone rule chooses a later shot
+    sensitivitySamples: 64, // trials per variation in the robustness check
     maxShots: 16, styleCost: .3,
     distSd: .07,      // distance spread as a fraction of carry (12-handicap assumption; replace with measured)
     missPct: 0,       // sideways bias as a fraction of carry, + = right (a fade grows with distance)
     ...opts };
   for (const [key, min, max] of [["off", 0, 10], ["treeH", 0, 100], ["disp", 0, 5],
     ["missM", -100, 100], ["wind", -50, 50], ["elevK", 0, 3], ["mishit", 0, 5],
-    ["styleCost", 0, 3], ["distSd", .01, .3], ["missPct", -.3, .3]]) finite(S[key], key, min, max);
+    ["styleCost", 0, 3], ["distSd", .01, .3], ["missPct", -.3, .3], ["zoneTol", 0, 1]]) finite(S[key], key, min, max);
   integer(S.seed, "seed", 0, 4294967295); integer(S.par, "par", 1, 10);
   integer(S.samples, "samples", 16, 4096); integer(S.policySamples, "policySamples", 4, 256);
-  integer(S.maxShots, "maxShots", 2, 64);
+  if (!["closest", "average"].includes(S.zoneRank)) throw new TypeError("zoneRank must be \"closest\" or \"average\".");
+  integer(S.maxShots, "maxShots", 2, 64); integer(S.zonePolicySamples, "zonePolicySamples", 4, 256); integer(S.sensitivitySamples, "sensitivitySamples", 16, 1024);
   if (S.elev != null && typeof S.elev !== "function") throw new TypeError("elev must be a function.");
   if (!Array.isArray(S.bag) || !S.bag.length) throw new TypeError("bag must not be empty.");
   const names = new Set();
@@ -509,6 +514,21 @@ function makeCaddie(hole, opts = {}) {
     const actualKey = canonical ? key : `point|${x}|${y}|${l}|${style}`;
     if (policyCache.has(actualKey)) return policyCache.get(actualKey);
     if (!canonical) { cx = x; cy = y; }
+    if (style === "zone") {              // the golfer's rule: closest acceptable zone, else least trouble
+      const zps = samples(`zonepol|${actualKey}`, S.zonePolicySamples);
+      const rows = candidates(cx, cy, l, false).flatMap(c => zoneBases(cx, cy).map(b => scanClub(cx, cy, c, zps, false, 18, 6, ZONE_WEIGHT, b)));
+      const ok = rows.filter(r => r.penalty <= S.zoneTol);
+      const row = (ok.length
+        ? (S.zoneRank === "average"
+          ? ok.map(r => ({ r, m: screen(cx, cy, { club: r.clubRow, off: 0, tgt: r.tgt }, false, zps).mean }))
+              .sort((a, b) => a.m - b.m || a.r.medianLeft - b.r.medianLeft).map(q => q.r)
+          : ok.sort((a, b) => a.medianLeft - b.medianLeft || a.penalty - b.penalty))
+        : rows.sort((a, b) => a.penalty - b.penalty || a.medianLeft - b.medianLeft))[0];
+      const zbest = { club: row.clubRow, off: 0, tgt: row.tgt };
+      if (policyCache.size >= 12000) policyCache.clear();
+      policyCache.set(actualKey, zbest);
+      return zbest;
+    }
     const ps = samples(`policy|${actualKey}`, S.policySamples);
     const list = actions(cx, cy, false, false).map(o => ({ ...o, ...screen(cx, cy, o, false, ps) }));
     list.sort((a, b) => a.mean - b.mean || actionKey(a).localeCompare(actionKey(b)));
@@ -726,46 +746,192 @@ function makeCaddie(hole, opts = {}) {
     }
     return rows;
   }
-  /* Zone search — the golfer's method. For each club the landing distance is fixed by the club
-     (a driver lands on its own arc, never beyond its reach). Slide the aim along that arc and keep
-     the direction whose simulated landing pattern sits furthest from trouble, ranked in the golfer's
-     order: water/OB/off-map > bunker > trees > uncertain > rough > fairway/green.
+  /* ===== The zone method (the golfer's way) =====
+     1. A club's landing distance is fixed by the club: a driver lands on its own ~230 m arc, never beyond.
+     2. Slide the aim along that arc to where the club's dispersion pattern sits furthest from trouble,
+        in the golfer's order: water/OB/off-map > bunker > trees > uncertain ground > rough > fairway/green.
+     3. Take the club that gets closest to the hole while its best zone is acceptable (trouble score <= zoneTol);
+        if no club is acceptable, the club with the least trouble.
+     4. Repeat from where the ball finishes: the same rule is the "zone" continuation policy.
+     5. The finished options are cross-examined by critics and chosen by fixed rules (planByZones).
      Every club and direction is judged on the same simulated shots (common random numbers). */
   const ZONE_WEIGHT = { W: 1, O: 1, X: 1, S: .7, T: .55, hit: .55, U: .35, R: .15, F: 0, G: 0 };
+  const TROUBLE_KEYS = ["T", "S", "W", "O", "X", "U"];
+  function dirTarget(x, y, a, base) {
+    const b = base || pin, th = Math.atan2(b[1] - y, b[0] - x) + a * Math.PI / 180;
+    return [x + Math.cos(th) * 2000, y + Math.sin(th) * 2000];
+  }
+  const zoneBases = (x, y) => [null, ...(hole.via || []).filter(v => distance([x, y], v) > 8 && dPin(...v) < dPin(x, y) - 8)];
+  function scanClub(x, y, c, ps, fromTee, span, step, w, base) {
+    let best = null; const scan = [], n = ps.length;
+    for (let a = -span; a <= span + 1e-9; a += step) {
+      const o = { club: c, off: 0, tgt: dirTarget(x, y, a, base) }, mix = {}, left = [];
+      let penalty = 0;
+      for (const p of ps) {
+        const r = sampleShot(x, y, o, fromTee, p), k = r.hit ? "hit" : r.k;
+        mix[k] = (mix[k] || 0) + 1 / n;
+        penalty += (w[k] == null ? .35 : w[k]) / n;
+        left.push(dPin(r.x, r.y));
+      }
+      left.sort((p, q) => p - q);
+      const row = { clubRow: c, angle: a, base: base ? "corner" : "flag", tgt: o.tgt, aim: aimPoint(x, y, o), penalty, mix, medianLeft: left[Math.floor(left.length / 2)] };
+      scan.push({ angle: a, penalty });
+      // furthest from trouble; near-ties (within 0.005) go to the line that leaves less to the flag
+      if (!best || penalty < best.penalty - .005 || (Math.abs(penalty - best.penalty) <= .005 && row.medianLeft < best.medianLeft)) best = row;
+    }
+    best.scan = scan;
+    return best;
+  }
+  /* clubs worth considering from the tee: long clubs on long holes, the right club on a par 3 */
+  function teeClubs(x, y) {
+    const d = dPin(x, y), low = Math.max(60, Math.min(d - 45, 150));
+    return S.bag.filter(c => c[1] >= low && c[1] <= d + 25 && !/chip|punch/i.test(c[0]));
+  }
   function zoneSearch(x, y, opts = {}) {
     point([x, y]);
-    const fromTee = !!opts.fromTee, n = opts.samples || S.samples;
-    const w = Object.assign({}, ZONE_WEIGHT, opts.weights || {});
-    const clubs = S.bag.filter(c => !opts.clubs || opts.clubs.includes(c[0]));
-    const span = opts.spanDeg == null ? 30 : opts.spanDeg, step = opts.stepDeg || 1;
-    const base = Math.atan2(pin[1] - y, pin[0] - x);
-    const dirTgt = a => { const th = base + a * Math.PI / 180; return [x + Math.cos(th) * 2000, y + Math.sin(th) * 2000]; };
+    const fromTee = !!opts.fromTee, n = opts.samples || S.samples, w = Object.assign({}, ZONE_WEIGHT, opts.weights || {});
+    const l = fromTee ? "F" : hole.lie(x, y);
+    const clubs = opts.clubs ? S.bag.filter(c => opts.clubs.includes(c[0])) : fromTee ? teeClubs(x, y) : candidates(x, y, l, false);
     const ps = samples(`zone|${x}|${y}|${fromTee}`, n);
-    const out = [];
-    for (const c of clubs) {
-      let best = null; const scan = [];
-      for (let a = -span; a <= span + 1e-9; a += step) {
-        const o = { club: c, off: 0, tgt: dirTgt(a) }, mix = {}, left = [];
-        let penalty = 0;
-        for (const p of ps) {
-          const r = sampleShot(x, y, o, fromTee, p), k = r.hit ? "hit" : r.k;
-          mix[k] = (mix[k] || 0) + 1 / n;
-          penalty += (w[k] == null ? .35 : w[k]) / n;
-          left.push(dPin(r.x, r.y));
-        }
-        left.sort((p, q) => p - q);
-        const row = { angle: a, aim: aimPoint(x, y, o), penalty, mix, medianLeft: left[Math.floor(left.length / 2)] };
-        scan.push({ angle: a, penalty });
-        // furthest from trouble; near-ties (within 0.005) go to the line that leaves less to the flag
-        if (!best || penalty < best.penalty - .005 || (Math.abs(penalty - best.penalty) <= .005 && row.medianLeft < best.medianLeft)) best = row;
+    return clubs.map(c => {
+      let best = null;
+      for (const b of zoneBases(x, y)) {
+        const row = scanClub(x, y, c, ps, fromTee, opts.spanDeg == null ? 30 : opts.spanDeg, opts.stepDeg || 1, w, b);
+        if (!best || row.penalty < best.penalty - .005 || (Math.abs(row.penalty - best.penalty) <= .005 && row.medianLeft < best.medianLeft)) best = row;
       }
-      const o = { club: c, off: 0, tgt: dirTgt(best.angle) };
-      out.push(Object.assign({ club: c[0], carry: c[1], width: c[2] }, best,
-        { cloud: ps.slice(0, 160).map(p => sampleShot(x, y, o, fromTee, p)), scan }));
+      const o = { club: c, off: 0, tgt: best.tgt };
+      return { club: c[0], carry: c[1], width: c[2], angle: best.angle, base: best.base, aim: best.aim, penalty: best.penalty,
+        mix: best.mix, medianLeft: best.medianLeft, scan: best.scan, option: o,
+        cloud: ps.slice(0, 160).map(p => sampleShot(x, y, o, fromTee, p)) };
+    });
+  }
+
+  /* ---- planByZones: zone candidates, critics, debate, verdict ---- */
+  const pctText = v => `${Math.round(100 * v)}%`;
+  function pairedStats(a, b) {
+    const n = a.length, d = a.map((v, i) => v - b[i]), m = d.reduce((s, v) => s + v, 0) / n;
+    const se = Math.sqrt(d.reduce((s, v) => s + (v - m) ** 2, 0) / Math.max(1, n - 1) / n);
+    return { mean: m, se, ci95: [m - 1.96 * se, m + 1.96 * se] };
+  }
+  function planByZones(x = 0, y = 0, opts = {}) {
+    point([x, y]);
+    const fromTee = opts.fromTee == null ? (x === 0 && y === 0) : !!opts.fromTee;
+    const l0 = fromTee ? "F" : hole.lie(x, y);
+    if (!legal(l0)) throw new RangeError("Move to a legal relief/replay position before requesting a plan.");
+    const zones = zoneSearch(x, y, { fromTee, clubs: opts.clubs, spanDeg: opts.spanDeg, stepDeg: opts.stepDeg });
+    if (!zones.length) throw new Error("No club can play this shot.");
+    const key = `zp|${x}|${y}|${fromTee}`;
+    const trials = Array.from({ length: S.samples }, (_, i) => samples(`rollout|${key}|${i}`, S.maxShots));
+    const lateral = aim => { const dx = pin[0] - x, dy = pin[1] - y, L = Math.hypot(dx, dy) || 1;
+      return ((aim[0] - x) * (dy / L) - (aim[1] - y) * (dx / L)); };           // + = right of the line to the flag
+    const cands = zones.map(z => {
+      const ev = evidence(x, y, z.option, fromTee, trials, "zone");
+      const leaves = ev.cloud.map(s => dPin(s.x, s.y)).sort((p, q) => p - q);
+      const trouble = TROUBLE_KEYS.reduce((s, k) => s + (ev.mix[k] || 0), 0);
+      const unverified = (() => { let tot = 0, bad = 0;
+        for (const k of ["T", "O"]) for (const [src, v] of Object.entries(ev.sources[k] || {})) { tot += v; if (src !== "marked") bad += v; }
+        return tot > .02 ? bad / tot : 0; })();
+      return Object.assign(ev, { zone: { angle: z.angle, base: z.base, penalty: z.penalty, mix: z.mix, medianLeft: z.medianLeft, aim: z.aim, aimOffset: lateral(z.aim), scan: z.scan },
+        leave: leaves[Math.floor(leaves.length / 2)], troubleShare: trouble, unverifiedShare: unverified });
+    });
+    const dblFlags = e => e.scores.map((s, i) => !e.completedRuns[i] || s >= S.par + 2 ? 1 : 0);
+    const birFlags = e => e.scores.map((s, i) => e.completedRuns[i] && s <= S.par - 1 ? 1 : 0);
+    const best0 = cands.slice().sort((a, b) => a.avg - b.avg)[0], safest = cands.slice().sort((a, b) => (a.pDouble ?? 1) - (b.pDouble ?? 1))[0];
+    for (const c of cands) {
+      c.cost = pairedStats(c.scores, best0.scores);                       // + = worse than the best average
+      c.dblVsBest = pairedStats(dblFlags(c), dblFlags(best0));
+      c.dblVsSafest = pairedStats(dblFlags(c), dblFlags(safest));
+      c.birVsBest = pairedStats(birFlags(c), birFlags(best0));
+    }
+    const label = c => `${c.club[0]} ${c.zone.angle === 0 ? "at the flag line" : `${Math.abs(c.zone.angle)}° ${c.zone.angle < 0 ? "right" : "left"}`}${c.zone.base === "corner" ? " (corner)" : ""}`;
+    /* The critics. Each is a rule on simulation numbers; an objection is sustained only when the numbers back it. */
+    const critics = [
+      { id: "typical-result", for: () => true,
+        veto: c => c.troubleShare > .5,
+        text: c => `${pctText(c.troubleShare)} of first shots finish in trees, sand, water, OB or uncertain ground, so the typical result is trouble` },
+      { id: "next-shot", for: s => s === "aggressive",
+        veto: c => c.troubleShare > .35,
+        text: c => `${pctText(c.troubleShare)} of first shots leave a recovery rather than an advance` },
+      { id: "cost", for: s => s !== "optimise",
+        veto: c => c.cost.mean > S.styleCost,
+        text: c => `costs ${c.cost.mean.toFixed(2)} strokes against the best average (limit ${S.styleCost})` },
+      { id: "disaster", for: s => s === "safe",
+        veto: c => c.dblVsSafest.mean > 1.96 * c.dblVsSafest.se && c.dblVsSafest.mean > 0,
+        text: c => `${(100 * c.dblVsSafest.mean).toFixed(1)} points more doubles-or-worse than the safest plan, beyond simulation noise` }
+    ];
+    const firstVeto = (c, style) => { for (const k of critics) if (k.for(style) && k.veto(c)) return { critic: k.id, reason: k.text(c) }; return null; };
+    const flagsFor = c => {
+      const f = [];
+      if (c.unverifiedShare > .5 && c.troubleShare > .05) f.push(`most of its trouble comes from auto-map or assumed ground (${pctText(c.unverifiedShare)}): check the map`);
+      if (c.dblVsSafest.mean > 1.96 * c.dblVsSafest.se && c.dblVsSafest.mean > .02) f.push(`${(100 * c.dblVsSafest.mean).toFixed(1)} points more doubles-or-worse than the safest plan`);
+      return f;
+    };
+    /* Advocates. Ties are decided by fixed rules, never by simulation noise:
+       optimise = lowest average;
+       aggressive = shortest approach; plans leaving within 8 m of the shortest tie, then most birdies, then lowest average;
+       safe = fewest doubles-or-worse; plans NOT sustainably worse than the safest (paired, beyond noise) tie,
+              and the cheapest (lowest average) of the tied plans wins. */
+    const advocate = {
+      optimise: (list) => list.slice().sort((a, b) => a.avg - b.avg)[0],
+      aggressive: (list) => { const m = Math.min(...list.map(c => c.leave));
+        return list.filter(c => c.leave <= m + 8).sort((a, b) => (b.pBirdie ?? 0) - (a.pBirdie ?? 0) || a.avg - b.avg)[0]; },
+      safe: (list) => { const low = list.slice().sort((a, b) => (a.pDouble ?? 1) - (b.pDouble ?? 1))[0];
+        const tied = list.filter(c => { const d = pairedStats(dblFlags(c), dblFlags(low)); return !(d.mean > 1.96 * d.se && d.mean > 0); });
+        return tied.sort((a, b) => a.avg - b.avg)[0]; }
+    };
+    const publicC = c => { const o = publicOption(c); return Object.assign(o, { zone: c.zone, leave: c.leave, troubleShare: c.troubleShare, unverifiedShare: c.unverifiedShare }); };
+    const strategies = {}, goal = { optimise: "the lowest average", aggressive: "the shortest approach", safe: "the fewest doubles-or-worse" };
+    for (const style of ["optimise", "aggressive", "safe"]) {
+      const rejected = [], survivors = [];
+      for (const c of cands) { const v = style === "optimise" ? null : firstVeto(c, style); if (v) rejected.push({ club: label(c), critic: v.critic, reason: v.reason }); else survivors.push(c); }
+      const pool = survivors.length ? survivors : [best0];
+      const win = advocate[style](pool);
+      for (const c of pool) if (c !== win) rejected.push({ club: label(c), critic: "advocate", reason: style === "optimise" ? `average ${c.avg.toFixed(2)} vs ${win.avg.toFixed(2)}` :
+        style === "aggressive" ? `leaves ${Math.round(c.leave)} m vs ${Math.round(win.leave)} m` : `${pctText(c.pDouble ?? 1)} doubles-or-worse vs ${pctText(win.pDouble ?? 1)}` });
+      strategies[style] = { win, rejected, noSurvivor: !survivors.length && style !== "optimise" };
+    }
+    const optWin = strategies.optimise.win;
+    const out = { method: "zones", position: [x, y], fromTee, tolerance: S.zoneTol, toPin: dPin(x, y), strategies: {},
+      zones: zones.map(z => ({ club: z.club, carry: z.carry, angle: z.angle, base: z.base, penalty: z.penalty, acceptable: z.penalty <= S.zoneTol, mix: z.mix, medianLeft: z.medianLeft })),
+      candidates: cands.map(publicC) };
+    for (const [style, s] of Object.entries(strategies)) {
+      const c = s.win, same = style !== "optimise" && c === optWin;
+      const text = style === "optimise" ? `Lowest simulated average (${c.avg.toFixed(2)}).` :
+        same ? `Same as Optimise: no zone plan within ${S.styleCost} strokes beats it on ${goal[style]}${style === "safe" ? " beyond simulation noise (plans tied on doubles go to the cheapest)" : ""}.` :
+        `${label(c)} gives ${goal[style]} among plans within ${S.styleCost} strokes of the best average: ${style === "aggressive" ? `leaves ${Math.round(c.leave)} m (Optimise's plan leaves ${Math.round(optWin.leave)} m)` : `${pctText(c.pDouble ?? 1)} doubles-or-worse (Optimise's plan ${pctText(optWin.pDouble ?? 1)})`}, at ${c.cost.mean >= 0 ? "+" : ""}${c.cost.mean.toFixed(2)} strokes (95% ${c.cost.ci95[0].toFixed(2)} to ${c.cost.ci95[1].toFixed(2)}, paired).`;
+      out.strategies[style] = { best: publicOption(c), label: label(c), zone: c.zone, expected: c.avg, leave: c.leave, pBirdie: c.pBirdie, pBogey: c.pBogey, pDouble: c.pDouble,
+        troubleShare: c.troubleShare, sources: c.sources, chain: c.chain, chainCompleted: c.chainCompleted, cloud: c.cloud,
+        uncertainty: { note: "Sampling noise only; says nothing about map or player-model error.", standardError: c.standardError, confidence95: c.confidence95, sampleCount: c.sampleCount },
+        verdict: { style, chosen: !same, same, reason: text, noSurvivor: s.noSurvivor, flags: flagsFor(c), rejected: s.rejected } };
+    }
+    out.agree = actionKey(out.strategies.aggressive.best) === actionKey(out.strategies.optimise.best) && actionKey(out.strategies.safe.best) === actionKey(out.strategies.optimise.best);
+    if (opts.reference) {
+      const ref = planFrom(x, y, fromTee).strategies.optimise, ev = evidence(x, y, ref.best, fromTee, trials, "optimise");
+      const vs = pairedStats(ev.scores, optWin.scores);
+      out.reference = { note: "What the average-minimising planner would play, on the same trials.", club: ref.best.club[0], off: ref.best.off, average: ev.avg,
+        pDouble: ev.pDouble, versusZoneOptimise: vs, distinguishable: Math.abs(vs.mean) > 1.96 * vs.se };
+      if (out.reference.distinguishable && vs.mean < 0)
+        out.strategies.optimise.verdict.flags.push(`challenger: the average-minimising planner finds a plan ${(-vs.mean).toFixed(2)} strokes better (95% ${(-vs.ci95[1]).toFixed(2)} to ${(-vs.ci95[0]).toFixed(2)}) by playing ${ref.best.club[0]} then choosing later shots by expected score`);
+    }
+    if (opts.sensitivity) {
+      // re-run the whole method under plausible changes to the assumptions; report how often each choice survives
+      const variants = [["trees 5 m lower", { treeH: Math.max(1, S.treeH - 5) }], ["trees 5 m higher", { treeH: S.treeH + 5 }],
+        ["distance spread -20%", { distSd: S.distSd * .8 }], ["distance spread +25%", { distSd: S.distSd * 1.25 }],
+        ["all carries -4%", { bag: S.bag.map(c => [c[0], c[1] * .96, c[2]]) }], ["all carries +4%", { bag: S.bag.map(c => [c[0], c[1] * 1.04, c[2]]) }]];
+      const runs = variants.map(([name, change]) => {
+        const sub = makeCaddie(hole, Object.assign({}, opts.caddieOptions || {}, S, change, { samples: S.sensitivitySamples }))
+          .planByZones(x, y, { fromTee, clubs: opts.clubs, spanDeg: opts.spanDeg, stepDeg: opts.stepDeg });
+        return { name, picks: Object.fromEntries(Object.entries(sub.strategies).map(([k, v]) => [k, v.best.club[0]])) };
+      });
+      out.robustness = Object.fromEntries(["optimise", "aggressive", "safe"].map(k => {
+        const mine = out.strategies[k].best.club[0], hold = runs.filter(r => r.picks[k] === mine).length;
+        return [k, { club: mine, holds: hold, of: runs.length, fragile: hold < Math.ceil(runs.length * .67),
+          flips: runs.filter(r => r.picks[k] !== mine).map(r => `${r.name}: ${r.picks[k]}`) }];
+      }));
     }
     return out;
   }
-  return { zoneSearch, teeByClub, planTee: () => planFrom(0, 0, true), planFrom: (x, y) => planFrom(x, y, false),
+  return { zoneSearch, planByZones, teeByClub, planTee: () => planFrom(0, 0, true), planFrom: (x, y) => planFrom(x, y, false),
     lie: hole.lie, es, warnings: warnings.slice(), model: "deterministic-heuristic-monte-carlo" };
 }
 
